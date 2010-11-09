@@ -1,0 +1,3 @@
+@echo off
+echo Delivering CEF libraries...
+xcopy /Y build\%1\*.dll "%2"
