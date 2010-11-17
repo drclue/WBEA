@@ -27,7 +27,8 @@ public:
   virtual RetVal HandleBeforeCreated(CefRefPtr<CefBrowser> parentBrowser,
                                      CefWindowInfo& createInfo, bool popup,
                                      CefRefPtr<CefHandler>& handler,
-                                     std::wstring& url)
+                                     std::wstring& url,
+                                     const CefPopupFeatures& popupFeatures)
   {
     return RV_CONTINUE;
   }
@@ -259,10 +260,7 @@ public:
                         KeyEventType type,
                         int code,
                         int modifiers,
-                        bool isSystemKey)
-  {
-    return RV_CONTINUE;
-  }
+                        bool isSystemKey);
 
   // Called to display a console message. Return RV_HANDLED to stop the message
   // from being output to the console.
@@ -303,7 +301,8 @@ public:
 
   // Load the application archive.
   void LoadArchive();
-  void LoadArchiveComplete(CefRefPtr<CefZipArchive> archive);
+  void LoadArchiveComplete(CefRefPtr<CefZipArchive> archive,
+                           CefRefPtr<CefXmlObject> settings);
 
   // Load the application menu.
   void LoadMenu();
@@ -316,6 +315,9 @@ public:
   // Retrieves the contents of the file at the specified relative path.
   bool GetFileContents(const std::wstring& relativePath,
       CefRefPtr<CefStreamReader>& resourceStream, std::wstring* mimeType);
+
+  // Returns the <app> section of the settings file, if any.
+  std::wstring GetAppSettings();
 
 protected:
 #ifdef _WIN32
@@ -350,6 +352,8 @@ protected:
 
   // Application archive.
   CefRefPtr<CefZipArchive> m_AppArchive;
+  // Application settings.
+  CefRefPtr<CefXmlObject> m_AppSettings;
 
 #ifdef _WIN32
   // Menu action map.

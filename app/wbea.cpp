@@ -5,7 +5,9 @@
 #include "include/cef.h"
 #include "include/cef_wrapper.h"
 #include "wbea.h"
+#include "aes_default_key.h"
 #include "resource_util.h"
+#include "string_util.h"
 #include "util.h"
 #include <sstream>
 #include <string>
@@ -82,7 +84,7 @@ CefHandler::RetVal WbeaHandler::HandleLoadError(CefRefPtr<CefBrowser> browser,
     ss <<       L"<html><head><title>Load Failed</title></head>"
                 L"<body><h1>Load Failed</h1>"
                 L"<h2>Load of URL " << failedUrl <<
-                L"failed with error code " << static_cast<int>(errorCode) <<
+                L" failed with error code " << static_cast<int>(errorCode) <<
                 L".</h2></body>"
                 L"</html>";
     errorText = ss.str();
@@ -192,17 +194,93 @@ void WbeaHandler::LoadArchive()
     Task(CefRefPtr<WbeaHandler> handler) : handler_(handler) {}
     virtual void Execute(CefThreadId threadId)
     {
-      // Attempt to load the archive file contents.
       CefRefPtr<CefZipArchive> archive;
-      CefRefPtr<CefStreamReader> reader;
-      std::wstringstream ss;
-      ss << AppGetExecutableDirectory() << AppGetExecutableName() << L".zip";
-      reader = CefStreamReader::CreateForFile(ss.str());
-      if (reader.get()) {
-        archive = new CefZipArchive();
-        archive->Load(reader, true);
+      CefRefPtr<CefXmlObject> settings;
+
+      const char* encryption_key = AES_DEFAULT_KEY;
+      std::string encryptionKeyStr;
+      
+      // Load the encrypted settings file, if any.
+      {
+        CefRefPtr<CefStreamReader> reader;
+        std::wstringstream ss;
+        ss << AppGetExecutableDirectory() << AppGetExecutableName() <<
+            L".wbeal";
+        reader = CefStreamReader::CreateForFile(ss.str());
+        if (reader.get()) {
+          // Decrypt the settings file.
+          unsigned char* out_bytes = NULL;
+          size_t out_size = 0;
+          if(Decrypt(encryption_key, reader, &out_bytes, &out_size)) {
+            // Read the XML data.
+            CefRefPtr<CefStreamReader> xmlReader(
+                CefStreamReader::CreateForHandler(
+                    new CefByteReadHandler(out_bytes, out_size, NULL)));
+            std::wstring error;
+            settings = new CefXmlObject(L"");
+            settings->Load(xmlReader, XML_ENCODING_NONE, L"", &error);
+            delete [] out_bytes;
+          }
+        }
       }
-      handler_->LoadArchiveComplete(archive);
+
+      // Load the archive file, if any.
+      {
+        CefRefPtr<CefStreamReader> reader;
+        std::wstringstream ss;
+        ss << AppGetExecutableDirectory() << AppGetExecutableName() << L".zip";
+        reader = CefStreamReader::CreateForFile(ss.str());
+        if (reader.get()) {
+          bool decrypt = false;
+          
+          // Test if the zip archive is encrypted.
+          char header[2] = {0};
+          reader->Read(&header, 1, 2);
+          decrypt = (header[0] != 'P' || header[1] != 'K');
+          reader->Seek(0, SEEK_SET);
+
+          CefRefPtr<CefStreamReader> archiveReader;
+
+          unsigned char* out_bytes = NULL;
+          if (decrypt) {
+            if (settings.get()) {
+              // Retrieve the archive encryption key from the settings.
+              CefRefPtr<CefXmlObject> settingsObj(
+                  settings->FindChild(L"settings"));
+              if (settingsObj.get())
+                  settingsObj = settingsObj->FindChild(L"encryption_key");
+              if (settingsObj.get()) {
+                std::wstring encryptionKey = settingsObj->GetValue();
+                if (encryptionKey.length() == 16) {
+                  encryptionKeyStr = WStringToString(encryptionKey);
+                  encryption_key = encryptionKeyStr.c_str();
+                }
+              }
+            }
+
+            // Decrypt the zip archive.
+            size_t out_size = 0;
+            if(Decrypt(encryption_key, reader, &out_bytes, &out_size)) {
+              archiveReader = CefStreamReader::CreateForHandler(
+                new CefByteReadHandler(out_bytes, out_size, NULL));
+            }
+          }
+
+          if (!archiveReader.get()) {
+            // Assume the archive isn't encrypted.
+            reader->Seek(0, SEEK_SET);
+            archiveReader = reader;
+          }
+
+          archive = new CefZipArchive();
+          archive->Load(archiveReader, true);
+
+          if (out_bytes)
+            delete [] out_bytes;
+        }
+      }
+
+      handler_->LoadArchiveComplete(archive, settings);
     }
   private:
     CefRefPtr<WbeaHandler> handler_;
@@ -212,9 +290,11 @@ void WbeaHandler::LoadArchive()
   CefPostTask(TID_FILE, task);
 }
 
-void WbeaHandler::LoadArchiveComplete(CefRefPtr<CefZipArchive> archive)
+void WbeaHandler::LoadArchiveComplete(CefRefPtr<CefZipArchive> archive,
+                                      CefRefPtr<CefXmlObject> settings)
 {
   m_AppArchive = archive;
+  m_AppSettings = settings;
 
   class Task : public CefThreadSafeBase<CefTask>
   {
@@ -272,6 +352,22 @@ bool WbeaHandler::GetFileContents(const std::wstring& relativePath,
   }
 
   return false;
+}
+
+std::wstring WbeaHandler::GetAppSettings()
+{
+  std::wstring ret;
+  
+  if (!m_AppSettings.get())
+    return ret;
+
+  CefRefPtr<CefXmlObject> obj(m_AppSettings->FindChild(L"settings"));
+  if (obj)
+    obj = obj->FindChild(L"app");
+  if (!obj)
+    return ret;
+
+  return obj->GetValue();
 }
 
 

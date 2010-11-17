@@ -363,8 +363,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		    return 0;
       }
       break;
-    
-	  case WM_DESTROY:
+
+    case WM_DESTROY:
       // The frame window has exited
       PostQuitMessage(0);
 		  return 0;
@@ -446,6 +446,22 @@ CefHandler::RetVal WbeaHandler::HandleBeforeResourceLoad(
 		if(pos > 0)
 			path = path.substr(0, pos);
     GetFileContents(path, resourceStream, &mimeType);
+  }
+
+  return RV_CONTINUE;
+}
+
+CefHandler::RetVal WbeaHandler::HandleKeyEvent(CefRefPtr<CefBrowser> browser,
+                                               KeyEventType type,
+                                               int code,
+                                               int modifiers,
+                                               bool isSystemKey)
+{
+  // Reload on CTRL-R.
+  if (m_Browser.get() && type == KEYEVENT_RAWKEYDOWN && code == 'R' &&
+      GetKeyState(VK_CONTROL) < 0) {
+    m_Browser->Reload();
+    return RV_HANDLED;
   }
 
   return RV_CONTINUE;

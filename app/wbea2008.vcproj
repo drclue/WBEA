@@ -175,11 +175,19 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
+				RelativePath=".\AES.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\resource_util.cpp"
 				>
 			</File>
 			<File
 				RelativePath=".\resource_util_win.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\string_util_win.cpp"
 				>
 			</File>
 			<File
@@ -201,11 +209,23 @@
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
 			<File
+				RelativePath=".\AES.h"
+				>
+			</File>
+			<File
+				RelativePath=".\aes_default_key.h"
+				>
+			</File>
+			<File
 				RelativePath=".\resource.h"
 				>
 			</File>
 			<File
 				RelativePath=".\resource_util.h"
+				>
+			</File>
+			<File
+				RelativePath=".\string_util.h"
 				>
 			</File>
 			<File

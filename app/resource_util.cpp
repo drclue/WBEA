@@ -3,6 +3,8 @@
 // file.
 
 #include "resource_util.h"
+#include "AES.h"
+#include "util.h"
 
 std::wstring GetSuggestedMimeType(const std::wstring& fileExt)
 {
@@ -660,4 +662,63 @@ std::wstring GetSuggestedMimeType(const std::wstring& fileExt)
   }
 
   return L"";
+}
+
+
+#define BLOCKLEN  16
+
+bool Decrypt(const char* key, CefRefPtr<CefStreamReader> readStream,
+             unsigned char** out_bytes, size_t* out_bytes_size)
+{
+  ASSERT(key);
+  ASSERT(out_bytes);
+  ASSERT(out_bytes_size);
+
+  // Determine the input size.
+  readStream->Seek(0, SEEK_END);
+  long size = readStream->Tell();
+  if(size == 0)
+    return false;
+
+  readStream->Seek(0, SEEK_SET);
+  
+  unsigned long num_blocks = (size + BLOCKLEN - 1) / BLOCKLEN;
+	unsigned long size_blocks = num_blocks * BLOCKLEN;
+	unsigned char* in_buf = new unsigned char[size_blocks];
+	unsigned char* out_buf = new unsigned char[size_blocks];
+	if (in_buf && out_buf) {
+    // Clear the last block.
+    memset(in_buf + size_blocks - BLOCKLEN, 0xFF, BLOCKLEN);
+
+    // Read the source file.
+    long offset = 0, read;
+    do {
+      read = readStream->Read(in_buf + offset, 1, size - offset);
+      offset += read;
+    } while (read > 0);
+
+    if (offset == size) {
+      int key_length = strlen((char*)key) * 8;
+
+      AES aes;
+      aes.SetParameters(key_length);
+      aes.StartDecryption((unsigned char*)key);
+      aes.Decrypt(in_buf, out_buf, num_blocks);
+
+      // Remove padding from the end of the contents.
+      for(; out_buf[size-1] == 0xFF; --size) ;
+
+      *out_bytes = out_buf;
+      *out_bytes_size = size;
+      delete [] in_buf;
+      return true;
+    }
+  }
+
+  if (in_buf)
+    delete [] in_buf;
+  if (out_buf)
+    delete [] out_buf;
+
+  return false;
 }

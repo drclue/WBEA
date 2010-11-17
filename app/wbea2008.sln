@@ -3,6 +3,8 @@ Microsoft Visual Studio Solution File, Format Version 10.00
 # Visual Studio 2008
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "wbea", "wbea2008.vcproj", "{E4369C2C-8F50-4B35-A524-7B72D29D9C08}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "encrypt", "encrypt\encrypt2008.vcproj", "{040E4CB7-065C-4ADC-B6AB-B88AF647A1CB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -13,6 +15,10 @@ Global
 		{E4369C2C-8F50-4B35-A524-7B72D29D9C08}.Debug|Win32.Build.0 = Debug|Win32
 		{E4369C2C-8F50-4B35-A524-7B72D29D9C08}.Release|Win32.ActiveCfg = Release|Win32
 		{E4369C2C-8F50-4B35-A524-7B72D29D9C08}.Release|Win32.Build.0 = Release|Win32
+		{040E4CB7-065C-4ADC-B6AB-B88AF647A1CB}.Debug|Win32.ActiveCfg = Debug|Win32
+		{040E4CB7-065C-4ADC-B6AB-B88AF647A1CB}.Debug|Win32.Build.0 = Debug|Win32
+		{040E4CB7-065C-4ADC-B6AB-B88AF647A1CB}.Release|Win32.ActiveCfg = Release|Win32
+		{040E4CB7-065C-4ADC-B6AB-B88AF647A1CB}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -17,4 +17,8 @@ bool LoadBinaryResource(int binaryId, DWORD &dwSize, LPBYTE &pBytes);
 // Returns the suggested mime type for the specified file extension.
 std::wstring GetSuggestedMimeType(const std::wstring& fileExt);
 
+// |out_bytes| must be freed by the caller.
+bool Decrypt(const char* key, CefRefPtr<CefStreamReader> readStream,
+             unsigned char** out_bytes, size_t* out_bytes_size);
+
 #endif // _RESOURCE_UTIL
