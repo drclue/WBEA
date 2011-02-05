@@ -11,7 +11,7 @@
 #include "util.h"
 #include <sstream>
 #include <commdlg.h>
-
+#include <direct.h>
 
 #define MAX_LOADSTRING 100
 
@@ -19,9 +19,9 @@
 HINSTANCE hInst;								// current instance
 WCHAR szTitle[MAX_LOADSTRING];					// The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];			// the main window class name
-WCHAR szWorkingDir[MAX_PATH];   // The current working directory
-WCHAR szExecutableDir[MAX_PATH];   // The current executable directory
-WCHAR szExecutableName[MAX_PATH];   // The current executable name
+CHAR szWorkingDir[MAX_PATH];   // The current working directory
+CHAR szExecutableDir[MAX_PATH];   // The current executable directory
+CHAR szExecutableName[MAX_PATH];   // The current executable name
 UINT uFindMsg;  // Message identifier for find events.
 HWND hFindDlg = NULL; // Handle for the find dialog.
 
@@ -50,30 +50,38 @@ int APIENTRY wWinMain(HINSTANCE hInstance,
   UNREFERENCED_PARAMETER(lpCmdLine);
 
   // Retrieve the current working directory.
-  if (_wgetcwd(szWorkingDir, MAX_PATH) == NULL)
+  if (_getcwd(szWorkingDir, MAX_PATH) == NULL)
     szWorkingDir[0] = 0;
 
   // Retrieve the executable directory and name.
-  WCHAR modulepath[MAX_PATH], filepath[MAX_PATH];
-  if (GetModuleFileName(NULL, (LPTCH)modulepath, MAX_PATH) > 0 &&
-      GetLongPathName(modulepath, filepath, MAX_PATH) > 0) {
-    LPWSTR name = wcsrchr(filepath, '\\');
+  CHAR modulepath[MAX_PATH], filepath[MAX_PATH];
+  if (GetModuleFileNameA(NULL, modulepath, MAX_PATH) > 0 &&
+      GetLongPathNameA(modulepath, filepath, MAX_PATH) > 0) {
+    LPCSTR name = strchr(filepath, '\\');
     if (name) {
       name++;
-      wcsncpy_s(szExecutableDir, MAX_PATH, filepath, name - filepath);
-      LPWSTR ext = wcsrchr(filepath, '.');
+      strncpy_s(szExecutableDir, MAX_PATH, filepath, name - filepath);
+      LPCSTR ext = strchr(filepath, '.');
       if (ext)
-        wcsncpy_s(szExecutableName, MAX_PATH, name, ext - name);
+        strncpy_s(szExecutableName, MAX_PATH, name, ext - name);
     }
   }
 
-  WCHAR cachepath[MAX_PATH];
-  swprintf(cachepath, MAX_PATH, L"%s%s_cache",
-      szExecutableDir, szExecutableName);
+  CHAR cachepath[MAX_PATH];
+  sprintf_s(cachepath, MAX_PATH, "%s%s_cache", szExecutableDir,
+      szExecutableName);
 
   // Initialize the CEF with messages processed using the current application's
   // message loop.
-  CefInitialize(false, cachepath);
+  CefSettings settings;
+  CefBrowserSettings browser_defaults;
+
+  CefString(&settings.cache_path).FromASCII(cachepath);
+#ifdef NDEBUG
+  settings.log_severity = LOGSEVERITY_DISABLE;
+#endif
+
+  CefInitialize(settings, browser_defaults);
   
   MSG msg;
   HACCEL hAccelTable;
@@ -268,7 +276,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         // Creat the new child child browser window
         CefBrowser::CreateBrowser(info, false,
             static_cast<CefRefPtr<CefHandler> >(g_handler),
-            L"http://__int/loading");
+            "http://__int/loading");
 
         // Load the application archive.
         g_handler->LoadArchive();
@@ -296,10 +304,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			    return 0;
         case ID_WARN_CONSOLEMESSAGE:
           if(g_handler.get()) {
-            std::wstringstream ss;
-            ss << L"Console messages will be written to "
+            std::stringstream ss;
+            ss << "Console messages will be written to "
                << g_handler->GetLogFile();
-            MessageBoxW(hWnd, ss.str().c_str(), L"Console Messages",
+            MessageBoxA(hWnd, ss.str().c_str(), "Console Messages",
                 MB_OK | MB_ICONINFORMATION);
           }
           return 0;
@@ -404,7 +412,7 @@ WbeaHandler::WbeaHandler()
 }
 
 CefHandler::RetVal WbeaHandler::HandleTitleChange(
-    CefRefPtr<CefBrowser> browser, const std::wstring& title)
+    CefRefPtr<CefBrowser> browser, const CefString& title)
 {
   // Set the frame window title bar
   CefWindowHandle hwnd = browser->GetWindowHandle();
@@ -419,26 +427,26 @@ CefHandler::RetVal WbeaHandler::HandleTitleChange(
 
 CefHandler::RetVal WbeaHandler::HandleBeforeResourceLoad(
     CefRefPtr<CefBrowser> browser, CefRefPtr<CefRequest> request,
-    std::wstring& redirectUrl, CefRefPtr<CefStreamReader>& resourceStream,
-    std::wstring& mimeType, int loadFlags)
+    CefString& redirectUrl, CefRefPtr<CefStreamReader>& resourceStream,
+    CefString& mimeType, int loadFlags)
 {
   DWORD dwSize;
   LPBYTE pBytes;
   
-  std::wstring url = request->GetURL();
-  if(url == L"http://__int/loading") {
+  std::string url = request->GetURL();
+  if(url == "http://__int/loading") {
     // Show the internal loading.html contents.
     if(LoadBinaryResource(IDS_LOADING, dwSize, pBytes)) {
       resourceStream = CefStreamReader::CreateForHandler(
           new CefByteReadHandler(pBytes, dwSize, NULL));
-      mimeType = L"text/html";
+      mimeType = "text/html";
     }
     return RV_CONTINUE;
   }
 
-  std::wstring prefix = L"http://__app/";
+  std::string prefix = "http://__app/";
   if(url.find(prefix) == 0) {
-    std::wstring path = url.substr(prefix.length());
+    std::string path = url.substr(prefix.length());
 		int pos = path.find('#');
 		if(pos > 0)
 			path = path.substr(0, pos);
@@ -484,19 +492,19 @@ void WbeaHandler::SendNotification(NotificationType type)
 void WbeaHandler::LoadMenu()
 {
   CefRefPtr<CefStreamReader> reader;
-  if(!GetFileContents(L"menu.xml", reader, NULL))
+  if(!GetFileContents("menu.xml", reader, NULL))
     return;
 
-  CefRefPtr<CefXmlObject> xmlObj(new CefXmlObject(L""));
-  std::wstring errorStr;
-  if(!xmlObj->Load(reader, XML_ENCODING_NONE, L"", &errorStr)) {
-    std::wstringstream ss;
-    ss << L"Failed to parse menu.xml\n" << errorStr.c_str();
-    MessageBox(m_MainHwnd, ss.str().c_str(), L"Error", MB_ICONERROR | MB_OK);
+  CefRefPtr<CefXmlObject> xmlObj(new CefXmlObject(""));
+  CefString errorStr;
+  if(!xmlObj->Load(reader, XML_ENCODING_NONE, "", &errorStr)) {
+    std::stringstream ss;
+    ss << "Failed to parse menu.xml\n" << errorStr.ToString().c_str();
+    MessageBoxA(m_MainHwnd, ss.str().c_str(), "Error", MB_ICONERROR | MB_OK);
     return;
   }
 
-  CefRefPtr<CefXmlObject> topMenuObj(xmlObj->FindChild(L"topmenu"));
+  CefRefPtr<CefXmlObject> topMenuObj(xmlObj->FindChild("topmenu"));
   if(!topMenuObj.get())
     return;
 
@@ -513,7 +521,7 @@ void WbeaHandler::HandleMenuAction(UINT id)
   if(it == m_MenuActionMap.end())
     return;
 
-  m_Browser->GetMainFrame()->ExecuteJavaScript(it->second, L"", 0);
+  m_Browser->GetMainFrame()->ExecuteJavaScript(it->second, "", 0);
 }
 
 void WbeaHandler::CreateMenu(HMENU menu, CefRefPtr<CefXmlObject> obj)
@@ -530,8 +538,8 @@ void WbeaHandler::CreateMenu(HMENU menu, CefRefPtr<CefXmlObject> obj)
   for(; it != children.end(); ++it) {
     child = *it;
     
-    if(child->HasAttribute(L"label")) {
-      label = child->GetAttributeValue(L"label");
+    if(child->HasAttribute("label")) {
+      label = child->GetAttributeValue("label");
       for(UINT i = 0; i < label.length(); ++i) {
         if(label[i] == '_')
           label[i] = '&';
@@ -540,17 +548,17 @@ void WbeaHandler::CreateMenu(HMENU menu, CefRefPtr<CefXmlObject> obj)
       label = L"";
     }
 
-    if(child->GetName() == L"menuitem") {
-      if(child->HasAttribute(L"separator")) {
+    if(child->GetName() == "menuitem") {
+      if(child->HasAttribute("separator")) {
         // Add a separator item.
         AddMenuSeparator(menu, index++);
       } else {
         // Add a standard item.
-        action = child->GetAttributeValue(L"action");
+        action = child->GetAttributeValue("action");
         AddMenuItem(menu, index++, label, action, true);
       }
     }
-    else if(child->GetName() == L"menu") {
+    else if(child->GetName() == "menu") {
       // Add a sub-menu.
       HMENU subMenu = AddMenu(menu, index++, label, true);
       CreateMenu(subMenu, child);
@@ -618,17 +626,17 @@ BOOL WbeaHandler::AddMenuSeparator(HMENU menu, UINT index)
 
 // Global functions
 
-std::wstring AppGetWorkingDirectory()
+std::string AppGetWorkingDirectory()
 {
 	return szWorkingDir;
 }
 
-std::wstring AppGetExecutableDirectory()
+std::string AppGetExecutableDirectory()
 {
   return szExecutableDir;
 }
 
-std::wstring AppGetExecutableName()
+std::string AppGetExecutableName()
 {
   return szExecutableName;
 }

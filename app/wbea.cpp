@@ -7,7 +7,6 @@
 #include "wbea.h"
 #include "aes_default_key.h"
 #include "resource_util.h"
-#include "string_util.h"
 #include "util.h"
 #include <sstream>
 #include <string>
@@ -34,7 +33,7 @@ CefHandler::RetVal WbeaHandler::HandleAfterCreated(
 }
 
 CefHandler::RetVal WbeaHandler::HandleLoadStart(CefRefPtr<CefBrowser> browser,
-    CefRefPtr<CefFrame> frame)
+    CefRefPtr<CefFrame> frame, bool isMainContent)
 {
   if(!browser->IsPopup() && !frame.get())
   {
@@ -49,7 +48,7 @@ CefHandler::RetVal WbeaHandler::HandleLoadStart(CefRefPtr<CefBrowser> browser,
 }
 
 CefHandler::RetVal WbeaHandler::HandleLoadEnd(CefRefPtr<CefBrowser> browser,
-    CefRefPtr<CefFrame> frame)
+    CefRefPtr<CefFrame> frame, bool isMainContent, int httpStatusCode)
 {
   if(!browser->IsPopup() && !frame.get())
   {
@@ -65,28 +64,28 @@ CefHandler::RetVal WbeaHandler::HandleLoadEnd(CefRefPtr<CefBrowser> browser,
 
 CefHandler::RetVal WbeaHandler::HandleLoadError(CefRefPtr<CefBrowser> browser,
     CefRefPtr<CefFrame> frame, ErrorCode errorCode,
-    const std::wstring& failedUrl, std::wstring& errorText)
+    const CefString& failedUrl, CefString& errorText)
 {
   if(errorCode == ERR_CACHE_MISS)
   {
     // Usually caused by navigating to a page with POST data via back or
     // forward buttons.
-    errorText = L"<html><head><title>Expired Form Data</title></head>"
-                L"<body><h1>Expired Form Data</h1>"
-                L"<h2>Your form request has expired. "
-                L"Click reload to re-submit the form data.</h2></body>"
-                L"</html>";
+    errorText = "<html><head><title>Expired Form Data</title></head>"
+                "<body><h1>Expired Form Data</h1>"
+                "<h2>Your form request has expired. "
+                "Click reload to re-submit the form data.</h2></body>"
+                "</html>";
   }
   else
   {
     // All other messages.
-    std::wstringstream ss;
-    ss <<       L"<html><head><title>Load Failed</title></head>"
-                L"<body><h1>Load Failed</h1>"
-                L"<h2>Load of URL " << failedUrl <<
-                L" failed with error code " << static_cast<int>(errorCode) <<
-                L".</h2></body>"
-                L"</html>";
+    std::stringstream ss;
+    ss <<       "<html><head><title>Load Failed</title></head>"
+                "<body><h1>Load Failed</h1>"
+                "<h2>Load of URL " << failedUrl.ToString().c_str() <<
+                " failed with error code " << static_cast<int>(errorCode) <<
+                ".</h2></body>"
+                "</html>";
     errorText = ss.str();
   }
   return RV_HANDLED;
@@ -94,10 +93,10 @@ CefHandler::RetVal WbeaHandler::HandleLoadError(CefRefPtr<CefBrowser> browser,
 
 CefHandler::RetVal WbeaHandler::HandlePrintHeaderFooter(
     CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-    CefPrintInfo& printInfo, const std::wstring& url, const std::wstring& title,
-    int currentPage, int maxPages, std::wstring& topLeft,
-    std::wstring& topCenter, std::wstring& topRight, std::wstring& bottomLeft,
-    std::wstring& bottomCenter, std::wstring& bottomRight)
+    CefPrintInfo& printInfo, const CefString& url, const CefString& title,
+    int currentPage, int maxPages, CefString& topLeft,
+    CefString& topCenter, CefString& topRight, CefString& bottomLeft,
+    CefString& bottomCenter, CefString& bottomRight)
 {
   // Place the page title at top left
   topLeft = title;
@@ -105,8 +104,8 @@ CefHandler::RetVal WbeaHandler::HandlePrintHeaderFooter(
   topRight = url;
   
   // Place "Page X of Y" at bottom center
-  std::wstringstream strstream;
-  strstream << L"Page " << currentPage << L" of " << maxPages;
+  std::stringstream strstream;
+  strstream << "Page " << currentPage << " of " << maxPages;
   bottomCenter = strstream.str();
 
   return RV_CONTINUE;
@@ -131,27 +130,33 @@ CefHandler::RetVal WbeaHandler::HandleBeforeWindowClose(
 }
 
 CefHandler::RetVal WbeaHandler::HandleConsoleMessage(
-    CefRefPtr<CefBrowser> browser, const std::wstring& message,
-    const std::wstring& source, int line)
+    CefRefPtr<CefBrowser> browser, const CefString& message,
+    const CefString& source, int line)
 {
   Lock();
   bool first_message = m_LogFile.empty();
   if(first_message) {
-    std::wstringstream ss;
-    ss << AppGetWorkingDirectory() << L"\\console.log";
+    std::stringstream ss;
+    ss << AppGetWorkingDirectory() << "\\console.log";
     m_LogFile = ss.str();
   }
-  std::wstring logFile = m_LogFile;
+  CefString logFile = m_LogFile;
   Unlock();
   
   FILE* file = NULL;
-  _wfopen_s(&file, logFile.c_str(), L"a, ccs=UTF-8");
+  
+#ifdef _WIN32
+  fopen_s(&file, logFile.ToString().c_str(), "a");
+#else
+  file = fopen(logFile.ToString().c_str(), "a");
+#endif
   
   if(file) {
-    std::wstringstream ss;
-    ss << L"Message: " << message << L"\r\nSource: " << source <<
-        L"\r\nLine: " << line << L"\r\n-----------------------\r\n";
-    fputws(ss.str().c_str(), file);
+    std::stringstream ss;
+    ss << "Message: " << message.ToString().c_str() <<
+        "\r\nSource: " << source.ToString().c_str() <<
+        "\r\nLine: " << line << "\r\n-----------------------\r\n";
+    fputs(ss.str().c_str(), file);
     fclose(file);
 
     if(first_message)
@@ -178,10 +183,10 @@ void WbeaHandler::SetMainHwnd(CefWindowHandle hwnd)
   Unlock();
 }
 
-std::wstring WbeaHandler::GetLogFile()
+std::string WbeaHandler::GetLogFile()
 {
   Lock();
-  std::wstring str = m_LogFile;
+  std::string str = m_LogFile;
   Unlock();
   return str;
 }
@@ -203,9 +208,9 @@ void WbeaHandler::LoadArchive()
       // Load the encrypted settings file, if any.
       {
         CefRefPtr<CefStreamReader> reader;
-        std::wstringstream ss;
+        std::stringstream ss;
         ss << AppGetExecutableDirectory() << AppGetExecutableName() <<
-            L".wbeal";
+            ".wbeal";
         reader = CefStreamReader::CreateForFile(ss.str());
         if (reader.get()) {
           // Decrypt the settings file.
@@ -216,9 +221,9 @@ void WbeaHandler::LoadArchive()
             CefRefPtr<CefStreamReader> xmlReader(
                 CefStreamReader::CreateForHandler(
                     new CefByteReadHandler(out_bytes, out_size, NULL)));
-            std::wstring error;
-            settings = new CefXmlObject(L"");
-            settings->Load(xmlReader, XML_ENCODING_NONE, L"", &error);
+            CefString error;
+            settings = new CefXmlObject("");
+            settings->Load(xmlReader, XML_ENCODING_NONE, "", &error);
             delete [] out_bytes;
           }
         }
@@ -227,8 +232,8 @@ void WbeaHandler::LoadArchive()
       // Load the archive file, if any.
       {
         CefRefPtr<CefStreamReader> reader;
-        std::wstringstream ss;
-        ss << AppGetExecutableDirectory() << AppGetExecutableName() << L".zip";
+        std::stringstream ss;
+        ss << AppGetExecutableDirectory() << AppGetExecutableName() << ".zip";
         reader = CefStreamReader::CreateForFile(ss.str());
         if (reader.get()) {
           bool decrypt = false;
@@ -246,13 +251,13 @@ void WbeaHandler::LoadArchive()
             if (settings.get()) {
               // Retrieve the archive encryption key from the settings.
               CefRefPtr<CefXmlObject> settingsObj(
-                  settings->FindChild(L"settings"));
+                  settings->FindChild("settings"));
               if (settingsObj.get())
-                  settingsObj = settingsObj->FindChild(L"encryption_key");
+                  settingsObj = settingsObj->FindChild("encryption_key");
               if (settingsObj.get()) {
-                std::wstring encryptionKey = settingsObj->GetValue();
+                CefString encryptionKey = settingsObj->GetValue();
                 if (encryptionKey.length() == 16) {
-                  encryptionKeyStr = WStringToString(encryptionKey);
+                  encryptionKeyStr = encryptionKey;
                   encryption_key = encryptionKeyStr.c_str();
                 }
               }
@@ -304,7 +309,7 @@ void WbeaHandler::LoadArchiveComplete(CefRefPtr<CefZipArchive> archive,
     {
       // Redirect to the index page.
       handler_->GetBrowser()->GetMainFrame()->LoadURL(
-          L"http://__app/index.html");
+          "http://__app/index.html");
     }
   private:
     CefRefPtr<WbeaHandler> handler_;
@@ -317,9 +322,9 @@ void WbeaHandler::LoadArchiveComplete(CefRefPtr<CefZipArchive> archive,
   LoadMenu();
 }
 
-bool WbeaHandler::GetFileContents(const std::wstring& relativePath,
+bool WbeaHandler::GetFileContents(const std::string& relativePath,
                                   CefRefPtr<CefStreamReader>& resourceStream,
-                                  std::wstring* mimeType)
+                                  CefString* mimeType)
 {
   if(m_AppArchive.get()) {
     // Attempt to load from the application archive.
@@ -330,21 +335,22 @@ bool WbeaHandler::GetFileContents(const std::wstring& relativePath,
 
   if(!resourceStream.get()) {
     // Attempt to load from the filesystem.
-    std::wstringstream ss;
-    ss << AppGetExecutableDirectory() << AppGetExecutableName() << L"\\" <<
-        relativePath;
+    std::stringstream ss;
+    ss << AppGetExecutableDirectory() << AppGetExecutableName() << "\\" <<
+        relativePath.c_str();
     resourceStream = CefStreamReader::CreateForFile(ss.str());
   }
 
   if(resourceStream.get()) {
     if(mimeType) {
       // Determine the correct mime type.
-      LPWSTR ext = wcsrchr(const_cast<LPWSTR>(relativePath.c_str()), '.');
+      std::string relativePathStr = relativePath;
+      LPCSTR ext = strchr(relativePathStr.c_str(), '.');
       if (ext)
         *mimeType = GetSuggestedMimeType(ext+1);
       if(mimeType->empty()) {
         ASSERT(FALSE); // Should not be reached.
-        *mimeType = L"text/plain";
+        *mimeType = "text/plain";
       }
     }
 
@@ -354,16 +360,16 @@ bool WbeaHandler::GetFileContents(const std::wstring& relativePath,
   return false;
 }
 
-std::wstring WbeaHandler::GetAppSettings()
+std::string WbeaHandler::GetAppSettings()
 {
-  std::wstring ret;
+  std::string ret;
   
   if (!m_AppSettings.get())
     return ret;
 
-  CefRefPtr<CefXmlObject> obj(m_AppSettings->FindChild(L"settings"));
+  CefRefPtr<CefXmlObject> obj(m_AppSettings->FindChild("settings"));
   if (obj)
-    obj = obj->FindChild(L"app");
+    obj = obj->FindChild("app");
   if (!obj)
     return ret;
 

@@ -48,29 +48,26 @@ extern "C" {
 #include "cef_types.h"
 
 
-// This function should only be called once when the application is started.
-// Create the thread to host the UI message loop.  A return value of true (1)
-// indicates that it succeeded and false (0) indicates that it failed. Set
-// |multi_threaded_message_loop| to true (1) to have the message loop run in a
-// separate thread.  If |multi_threaded_message_loop| is false (0) than the
-// cef_do_message_loop_work() function must be called from your message loop.
-// Set |cache_path| to the location where cache data will be stored on disk. If
-// |cache_path| is NULL an in-memory cache will be used for cache data.
-CEF_EXPORT int cef_initialize(int multi_threaded_message_loop,
-    const wchar_t* cache_path);
+// This function should be called on the main application thread to initialize
+// CEF when the application is started.  A return value of true (1) indicates
+// that it succeeded and false (0) indicates that it failed.
+CEF_EXPORT int cef_initialize(const struct _cef_settings_t* settings,
+    const struct _cef_browser_settings_t* browser_defaults);
 
-// This function should only be called once before the application exits. Shut
-// down the thread hosting the UI message loop and destroy any created windows.
+// This function should be called on the main application thread to shut down
+// CEF before the application exits.
 CEF_EXPORT void cef_shutdown();
 
-// Perform message loop processing.  Has no affect if the browser UI loop is
-// running in a separate thread.
+// Perform message loop processing. This function must be called on the main
+// application thread if cef_initialize() is called with a
+// CefSettings.multi_threaded_message_loop value of false (0).
 CEF_EXPORT void cef_do_message_loop_work();
 
 // Register a new V8 extension with the specified JavaScript extension code and
 // handler. Functions implemented by the handler are prototyped using the
 // keyword 'native'. The calling of a native function is restricted to the scope
-// in which the prototype of the native function is defined.
+// in which the prototype of the native function is defined. This function may
+// be called on any thread.
 //
 // Example JavaScript extension code:
 //
@@ -123,33 +120,48 @@ CEF_EXPORT void cef_do_message_loop_work();
 //   // Call another function.
 //   example.test.increment();
 //
-CEF_EXPORT int cef_register_extension(const wchar_t* extension_name,
-    const wchar_t* javascript_code, struct _cef_v8handler_t* handler);
+CEF_EXPORT int cef_register_extension(const cef_string_t* extension_name,
+    const cef_string_t* javascript_code, struct _cef_v8handler_t* handler);
 
 // Register a custom scheme handler factory for the specified |scheme_name| and
 // |host_name|. All URLs beginning with scheme_name://host_name/ can be handled
 // by cef_scheme_handler_t instances returned by the factory. Specify an NULL
-// |host_name| value to match all host names.
-CEF_EXPORT int cef_register_scheme(const wchar_t* scheme_name,
-    const wchar_t* host_name, struct _cef_scheme_handler_factory_t* factory);
+// |host_name| value to match all host names. This function may be called on any
+// thread.
+CEF_EXPORT int cef_register_scheme(const cef_string_t* scheme_name,
+    const cef_string_t* host_name,
+    struct _cef_scheme_handler_factory_t* factory);
 
 // CEF maintains multiple internal threads that are used for handling different
 // types of tasks. The UI thread creates the browser window and is used for all
 // interaction with the WebKit rendering engine and V8 JavaScript engine (The UI
-// thread will be the same as the main application thread if cef_initialize()
-// was called with a |multi_threaded_message_loop| value of false (0).) The IO
-// thread is used for handling schema and network requests. The FILE thread is
-// used for the application cache and other miscellaneous activities. This
-// function will return true (1) if called on the specified thread.
+// thread will be the same as the main application thread if cef_initialize() is
+// called with a CefSettings.multi_threaded_message_loop value of false (0).)
+// The IO thread is used for handling schema and network requests. The FILE
+// thread is used for the application cache and other miscellaneous activities.
+// This function will return true (1) if called on the specified thread.
 CEF_EXPORT int cef_currently_on(cef_thread_id_t threadId);
 
-// Post a task for execution on the specified thread.
+// Post a task for execution on the specified thread. This function may be
+// called on any thread.
 CEF_EXPORT int cef_post_task(cef_thread_id_t threadId,
     struct _cef_task_t* task);
 
-// Post a task for delayed execution on the specified thread.
+// Post a task for delayed execution on the specified thread. This function may
+// be called on any thread.
 CEF_EXPORT int cef_post_delayed_task(cef_thread_id_t threadId,
     struct _cef_task_t* task, long delay_ms);
+
+// Parse the specified |url| into its component parts. Returns false (0) if the
+// URL is NULL or invalid.
+CEF_EXPORT int cef_parse_url(const cef_string_t* url,
+    struct _cef_urlparts_t* parts);
+
+// Creates a URL from the specified |parts|, which must contain a non-NULL spec
+// or a non-NULL host and path (at a minimum), but not both. Returns false (0)
+// if |parts| isn't initialized as described.
+CEF_EXPORT int cef_create_url(const struct _cef_urlparts_t* parts,
+    cef_string_t* url);
 
 typedef struct _cef_base_t
 {
@@ -175,7 +187,8 @@ typedef struct _cef_base_t
 #define CEF_MEMBER_MISSING(s, f)  (!CEF_MEMBER_EXISTS(s, f) || !((s)->f))
 
 
-// Implement this structure for task execution.
+// Implement this structure for task execution. The functions of this structure
+// may be called on any thread.
 typedef struct _cef_task_t
 {
   // Base structure.
@@ -188,8 +201,8 @@ typedef struct _cef_task_t
 } cef_task_t;
 
 
-// Structure used to represent a browser window.  All functions exposed by this
-// structure should be thread safe.
+// Structure used to represent a browser window. The functions of this structure
+// may be called on any thread unless otherwise indicated in the comments.
 typedef struct _cef_browser_t
 {
   // Base structure.
@@ -216,8 +229,8 @@ typedef struct _cef_browser_t
   // Stop loading the page.
   void (CEF_CALLBACK *stop_load)(struct _cef_browser_t* self);
 
-  // Set focus for the browser window.  If |enable| is true (1) focus will be
-  // set to the window.  Otherwise, focus will be removed.
+  // Set focus for the browser window. If |enable| is true (1) focus will be set
+  // to the window. Otherwise, focus will be removed.
   void (CEF_CALLBACK *set_focus)(struct _cef_browser_t* self, int enable);
 
   // Retrieve the window handle for this browser.
@@ -235,15 +248,18 @@ typedef struct _cef_browser_t
   struct _cef_frame_t* (CEF_CALLBACK *get_main_frame)(
       struct _cef_browser_t* self);
 
-  // Returns the focused frame for the browser window.
+  // Returns the focused frame for the browser window. This function should only
+  // be called on the UI thread.
   struct _cef_frame_t* (CEF_CALLBACK *get_focused_frame)(
       struct _cef_browser_t* self);
 
-  // Returns the frame with the specified name, or NULL if not found.
+  // Returns the frame with the specified name, or NULL if not found. This
+  // function should only be called on the UI thread.
   struct _cef_frame_t* (CEF_CALLBACK *get_frame)(struct _cef_browser_t* self,
-      const wchar_t* name);
+      const cef_string_t* name);
 
-  // Returns the names of all existing frames.
+  // Returns the names of all existing frames. This function should only be
+  // called on the UI thread.
   void (CEF_CALLBACK *get_frame_names)(struct _cef_browser_t* self,
       cef_string_list_t names);
 
@@ -253,32 +269,47 @@ typedef struct _cef_browser_t
   // be case-sensitive. |findNext| indicates whether this is the first request
   // or a follow-up.
   void (CEF_CALLBACK *find)(struct _cef_browser_t* self, int identifier,
-      const wchar_t* searchText, int forward, int matchCase, int findNext);
+      const cef_string_t* searchText, int forward, int matchCase,
+      int findNext);
 
   // Cancel all searches that are currently going on.
   void (CEF_CALLBACK *stop_finding)(struct _cef_browser_t* self,
       int clearSelection);
+
+  // Get the zoom level.
+  double (CEF_CALLBACK *get_zoom_level)(struct _cef_browser_t* self);
+
+  // Change the zoom level to the specified value.
+  void (CEF_CALLBACK *set_zoom_level)(struct _cef_browser_t* self,
+      double zoomLevel);
+
+  // Open developer tools in its own window.
+  void (CEF_CALLBACK *show_dev_tools)(struct _cef_browser_t* self);
+
+  // Explicitly close the developer tools window if one exists for this browser
+  // instance.
+  void (CEF_CALLBACK *close_dev_tools)(struct _cef_browser_t* self);
 
 } cef_browser_t;
 
 
 // Create a new browser window using the window parameters specified by
 // |windowInfo|. All values will be copied internally and the actual window will
-// be created on the UI thread.  The |popup| parameter should be true (1) if the
+// be created on the UI thread. The |popup| parameter should be true (1) if the
 // new window is a popup window. This function call will not block.
 CEF_EXPORT int cef_browser_create(cef_window_info_t* windowInfo, int popup,
-    struct _cef_handler_t* handler, const wchar_t* url);
+    struct _cef_handler_t* handler, const cef_string_t* url);
 
 // Create a new browser window using the window parameters specified by
 // |windowInfo|. The |popup| parameter should be true (1) if the new window is a
-// popup window. This function call will block and can only be used if the
-// |multi_threaded_message_loop| parameter to cef_initialize() is false (0).
+// popup window. This function should only be called on the UI thread.
 CEF_EXPORT cef_browser_t* cef_browser_create_sync(cef_window_info_t* windowInfo,
-    int popup, struct _cef_handler_t* handler, const wchar_t* url);
+    int popup, struct _cef_handler_t* handler, const cef_string_t* url);
 
 
-// Structure used to represent a frame in the browser window.  All functions
-// exposed by this structure should be thread safe.
+// Structure used to represent a frame in the browser window. The functions of
+// this structure may be called on any thread unless otherwise indicated in the
+// comments.
 typedef struct _cef_frame_t
 {
   // Base structure.
@@ -313,28 +344,31 @@ typedef struct _cef_frame_t
   // default text viewing application.
   void (CEF_CALLBACK *view_source)(struct _cef_frame_t* self);
 
-  // Returns this frame's HTML source as a string.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_source)(struct _cef_frame_t* self);
+  // Returns this frame's HTML source as a string. This function should only be
+  // called on the UI thread.
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_source)(struct _cef_frame_t* self);
 
-  // Returns this frame's display text as a string.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_text)(struct _cef_frame_t* self);
+  // Returns this frame's display text as a string. This function should only be
+  // called on the UI thread.
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_text)(struct _cef_frame_t* self);
 
   // Load the request represented by the |request| object.
   void (CEF_CALLBACK *load_request)(struct _cef_frame_t* self,
       struct _cef_request_t* request);
 
   // Load the specified |url|.
-  void (CEF_CALLBACK *load_url)(struct _cef_frame_t* self, const wchar_t* url);
+  void (CEF_CALLBACK *load_url)(struct _cef_frame_t* self,
+      const cef_string_t* url);
 
   // Load the contents of |string| with the optional dummy target |url|.
   void (CEF_CALLBACK *load_string)(struct _cef_frame_t* self,
-      const wchar_t* string, const wchar_t* url);
+      const cef_string_t* string, const cef_string_t* url);
 
   // Load the contents of |stream| with the optional dummy target |url|.
   void (CEF_CALLBACK *load_stream)(struct _cef_frame_t* self,
-      struct _cef_stream_reader_t* stream, const wchar_t* url);
+      struct _cef_stream_reader_t* stream, const cef_string_t* url);
 
   // Execute a string of JavaScript code in this frame. The |script_url|
   // parameter is the URL where the script in question can be found, if any. The
@@ -342,253 +376,294 @@ typedef struct _cef_frame_t
   // error.  The |start_line| parameter is the base line number to use for error
   // reporting.
   void (CEF_CALLBACK *execute_java_script)(struct _cef_frame_t* self,
-      const wchar_t* jsCode, const wchar_t* scriptUrl, int startLine);
+      const cef_string_t* jsCode, const cef_string_t* scriptUrl,
+      int startLine);
 
   // Returns true (1) if this is the main frame.
   int (CEF_CALLBACK *is_main)(struct _cef_frame_t* self);
 
-  // Returns true (1) if this is the focused frame.
+  // Returns true (1) if this is the focused frame. This function should only be
+  // called on the UI thread.
   int (CEF_CALLBACK *is_focused)(struct _cef_frame_t* self);
 
   // Returns this frame's name.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_name)(struct _cef_frame_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_name)(struct _cef_frame_t* self);
 
-  // Return the URL currently loaded in this frame.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_url)(struct _cef_frame_t* self);
+  // Return the URL currently loaded in this frame. This function should only be
+  // called on the UI thread.
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_url)(struct _cef_frame_t* self);
 
 } cef_frame_t;
 
 
 // Structure that should be implemented to handle events generated by the
-// browser window.  All functions exposed by this structure should be thread
-// safe. Each function in the structure returns a RetVal value.
+// browser window. The functions of this structure will be called on the thread
+// indicated in the function comments.
 typedef struct _cef_handler_t
 {
   // Base structure.
   cef_base_t base;
 
-  // Event called before a new window is created. The |parentBrowser| parameter
-  // will point to the parent browser window, if any. The |popup| parameter will
-  // be true (1) if the new window is a popup window, in which case
-  // |popupFeatures| will contain information about the style of popup window
-  // requested. If you create the window yourself you should populate the window
-  // handle member of |createInfo| and return RV_HANDLED.  Otherwise, return
-  // RV_CONTINUE and the framework will create the window.  By default, a newly
-  // created window will recieve the same handler as the parent window.  To
-  // change the handler for the new window modify the object that |handler|
+  // Called on the UI thread before a new window is created. The |parentBrowser|
+  // parameter will point to the parent browser window, if any. The |popup|
+  // parameter will be true (1) if the new window is a popup window, in which
+  // case |popupFeatures| will contain information about the style of popup
+  // window requested. If you create the window yourself you should populate the
+  // window handle member of |createInfo| and return RV_HANDLED.  Otherwise,
+  // return RV_CONTINUE and the framework will create the window.  By default, a
+  // newly created window will recieve the same handler as the parent window.
+  // To change the handler for the new window modify the object that |handler|
   // points to.
   enum cef_retval_t (CEF_CALLBACK *handle_before_created)(
       struct _cef_handler_t* self, struct _cef_browser_t* parentBrowser,
       struct _cef_window_info_t* windowInfo, int popup,
+      const struct _cef_popup_features_t* popupFeatures,
       struct _cef_handler_t** handler, cef_string_t* url,
-      const struct _cef_popup_features_t* popupFeatures);
+      struct _cef_browser_settings_t* settings);
 
-  // Event called after a new window is created. The return value is currently
-  // ignored.
+  // Called on the UI thread after a new window is created. The return value is
+  // currently ignored.
   enum cef_retval_t (CEF_CALLBACK *handle_after_created)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser);
 
-  // Event called when a frame's address has changed. The return value is
-  // currently ignored.
+  // Called on the UI thread when a frame's address has changed. The return
+  // value is currently ignored.
   enum cef_retval_t (CEF_CALLBACK *handle_address_change)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
-      struct _cef_frame_t* frame, const wchar_t* url);
+      struct _cef_frame_t* frame, const cef_string_t* url);
 
-  // Event called when the page title changes. The return value is currently
-  // ignored.
+  // Called on the UI thread when the page title changes. The return value is
+  // currently ignored.
   enum cef_retval_t (CEF_CALLBACK *handle_title_change)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
-      const wchar_t* title);
+      const cef_string_t* title);
 
-  // Event called before browser navigation. The client has an opportunity to
-  // modify the |request| object if desired.  Return RV_HANDLED to cancel
-  // navigation.
+  // Called on the UI thread before browser navigation. The client has an
+  // opportunity to modify the |request| object if desired.  Return RV_HANDLED
+  // to cancel navigation.
   enum cef_retval_t (CEF_CALLBACK *handle_before_browse)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       struct _cef_frame_t* frame, struct _cef_request_t* request,
       enum cef_handler_navtype_t navType, int isRedirect);
 
-  // Event called when the browser begins loading a page.  The |frame| pointer
-  // will be NULL if the event represents the overall load status and not the
-  // load status for a particular frame.  The return value is currently ignored.
+  // Called on the UI thread when the browser begins loading a page. The |frame|
+  // pointer will be NULL if the event represents the overall load status and
+  // not the load status for a particular frame. |isMainContent| will be true
+  // (1) if this load is for the main content area and not an iframe. This
+  // function may not be called if the load request fails. The return value is
+  // currently ignored.
   enum cef_retval_t (CEF_CALLBACK *handle_load_start)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
-      struct _cef_frame_t* frame);
+      struct _cef_frame_t* frame, int isMainContent);
 
-  // Event called when the browser is done loading a page. The |frame| pointer
-  // will be NULL if the event represents the overall load status and not the
-  // load status for a particular frame. This event will be generated
-  // irrespective of whether the request completes successfully. The return
-  // value is currently ignored.
+  // Called on the UI thread when the browser is done loading a page. The
+  // |frame| pointer will be NULL if the event represents the overall load
+  // status and not the load status for a particular frame. |isMainContent| will
+  // be true (1) if this load is for the main content area and not an iframe.
+  // This function will be called irrespective of whether the request completes
+  // successfully. The return value is currently ignored.
   enum cef_retval_t (CEF_CALLBACK *handle_load_end)(struct _cef_handler_t* self,
-      struct _cef_browser_t* browser, struct _cef_frame_t* frame);
+      struct _cef_browser_t* browser, struct _cef_frame_t* frame,
+      int isMainContent, int httpStatusCode);
 
-  // Called when the browser fails to load a resource.  |errorCode| is the error
-  // code number and |failedUrl| is the URL that failed to load.  To provide
-  // custom error text assign the text to |errorText| and return RV_HANDLED.
-  // Otherwise, return RV_CONTINUE for the default error text.
+  // Called on the UI thread when the browser fails to load a resource.
+  // |errorCode| is the error code number and |failedUrl| is the URL that failed
+  // to load. To provide custom error text assign the text to |errorText| and
+  // return RV_HANDLED.  Otherwise, return RV_CONTINUE for the default error
+  // text.
   enum cef_retval_t (CEF_CALLBACK *handle_load_error)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       struct _cef_frame_t* frame, enum cef_handler_errorcode_t errorCode,
-      const wchar_t* failedUrl, cef_string_t* errorText);
+      const cef_string_t* failedUrl, cef_string_t* errorText);
 
-  // Event called before a resource is loaded.  To allow the resource to load
-  // normally return RV_CONTINUE. To redirect the resource to a new url populate
-  // the |redirectUrl| value and return RV_CONTINUE.  To specify data for the
-  // resource return a CefStream object in |resourceStream|, set |mimeType| to
-  // the resource stream's mime type, and return RV_CONTINUE. To cancel loading
-  // of the resource return RV_HANDLED.  Any modifications to |request| will be
-  // observed.  If the URL in |request| is changed and |redirectUrl| is also
-  // set, the URL in |request| will be used.
+  // Called on the IO thread before a resource is loaded.  To allow the resource
+  // to load normally return RV_CONTINUE. To redirect the resource to a new url
+  // populate the |redirectUrl| value and return RV_CONTINUE.  To specify data
+  // for the resource return a CefStream object in |resourceStream|, set
+  // |mimeType| to the resource stream's mime type, and return RV_CONTINUE. To
+  // cancel loading of the resource return RV_HANDLED. Any modifications to
+  // |request| will be observed.  If the URL in |request| is changed and
+  // |redirectUrl| is also set, the URL in |request| will be used.
   enum cef_retval_t (CEF_CALLBACK *handle_before_resource_load)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       struct _cef_request_t* request, cef_string_t* redirectUrl,
       struct _cef_stream_reader_t** resourceStream, cef_string_t* mimeType,
       int loadFlags);
 
-  // Called when a server indicates via the 'Content-Disposition' header that a
-  // response represents a file to download. |mimeType| is the mime type for the
-  // download, |fileName| is the suggested target file name and |contentLength|
-  // is either the value of the 'Content-Size' header or -1 if no size was
-  // provided. Set |handler| to the cef_download_handler_t instance that will
-  // recieve the file contents.  Return RV_CONTINUE to download the file or
-  // RV_HANDLED to cancel the file download.
+  // Called on the IO thread to handle requests for URLs with an unknown
+  // protocol component. Return RV_HANDLED to indicate that the request should
+  // succeed because it was externally handled. Set |allow_os_execution| to true
+  // (1) and return RV_CONTINUE to attempt execution via the registered OS
+  // protocol handler, if any. If RV_CONTINUE is returned and either
+  // |allow_os_execution| is false (0) or OS protocol handler execution fails
+  // then the request will fail with an error condition. SECURITY WARNING: YOU
+  // SHOULD USE THIS METHOD TO ENFORCE RESTRICTIONS BASED ON SCHEME, HOST OR
+  // OTHER URL ANALYSIS BEFORE ALLOWING OS EXECUTION.
+  enum cef_retval_t (CEF_CALLBACK *handle_protocol_execution)(
+      struct _cef_handler_t* self, struct _cef_browser_t* browser,
+      const cef_string_t* url, int* allow_os_execution);
+
+  // Called on the UI thread when a server indicates via the 'Content-
+  // Disposition' header that a response represents a file to download.
+  // |mimeType| is the mime type for the download, |fileName| is the suggested
+  // target file name and |contentLength| is either the value of the 'Content-
+  // Size' header or -1 if no size was provided. Set |handler| to the
+  // cef_download_handler_t instance that will recieve the file contents. Return
+  // RV_CONTINUE to download the file or RV_HANDLED to cancel the file download.
   enum cef_retval_t (CEF_CALLBACK *handle_download_response)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
-      const wchar_t* mimeType, const wchar_t* fileName, int64 contentLength,
-      struct _cef_download_handler_t** handler);
+      const cef_string_t* mimeType, const cef_string_t* fileName,
+      int64 contentLength, struct _cef_download_handler_t** handler);
 
-  // Event called before a context menu is displayed.  To cancel display of the
-  // default context menu return RV_HANDLED.
+  // Called on the IO thread when the browser needs credentials from the user.
+  // |isProxy| indicates whether the host is a proxy server. |host| contains the
+  // hostname and port number. Set |username| and |password| and return
+  // RV_HANDLED to handle the request. Return RV_CONTINUE to cancel the request.
+  enum cef_retval_t (CEF_CALLBACK *handle_authentication_request)(
+      struct _cef_handler_t* self, struct _cef_browser_t* browser, int isProxy,
+      const cef_string_t* host, const cef_string_t* realm,
+      const cef_string_t* scheme, cef_string_t* username,
+      cef_string_t* password);
+
+  // Called on the UI thread before a context menu is displayed. To cancel
+  // display of the default context menu return RV_HANDLED.
   enum cef_retval_t (CEF_CALLBACK *handle_before_menu)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       const struct _cef_handler_menuinfo_t* menuInfo);
 
-  // Event called to optionally override the default text for a context menu
-  // item.  |label| contains the default text and may be modified to substitute
-  // alternate text.  The return value is currently ignored.
+  // Called on the UI thread to optionally override the default text for a
+  // context menu item. |label| contains the default text and may be modified to
+  // substitute alternate text. The return value is currently ignored.
   enum cef_retval_t (CEF_CALLBACK *handle_get_menu_label)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       enum cef_handler_menuid_t menuId, cef_string_t* label);
 
-  // Event called when an option is selected from the default context menu.
-  // Return RV_HANDLED to cancel default handling of the action.
+  // Called on the UI thread when an option is selected from the default context
+  // menu. Return RV_HANDLED to cancel default handling of the action.
   enum cef_retval_t (CEF_CALLBACK *handle_menu_action)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       enum cef_handler_menuid_t menuId);
 
-  // Event called to allow customization of standard print options before the
-  // print dialog is displayed. |printOptions| allows specification of paper
-  // size, orientation and margins. Note that the specified margins may be
-  // adjusted if they are outside the range supported by the printer. All units
-  // are in inches. Return RV_CONTINUE to display the default print options or
-  // RV_HANDLED to display the modified |printOptions|.
+  // Called on the UI thread to allow customization of standard print options
+  // before the print dialog is displayed. |printOptions| allows specification
+  // of paper size, orientation and margins. Note that the specified margins may
+  // be adjusted if they are outside the range supported by the printer. All
+  // units are in inches. Return RV_CONTINUE to display the default print
+  // options or RV_HANDLED to display the modified |printOptions|.
   enum cef_retval_t (CEF_CALLBACK *handle_print_options)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       struct _cef_print_options_t* printOptions);
 
-  // Event called to format print headers and footers.  |printInfo| contains
-  // platform-specific information about the printer context.  |url| is the URL
-  // if the currently printing page, |title| is the title of the currently
-  // printing page, |currentPage| is the current page number and |maxPages| is
-  // the total number of pages.  Six default header locations are provided by
-  // the implementation: top left, top center, top right, bottom left, bottom
-  // center and bottom right.  To use one of these default locations just assign
-  // a string to the appropriate variable.  To draw the header and footer
-  // yourself return RV_HANDLED.  Otherwise, populate the approprate variables
-  // and return RV_CONTINUE.
+  // Called on the UI thread to format print headers and footers. |printInfo|
+  // contains platform-specific information about the printer context. |url| is
+  // the URL if the currently printing page, |title| is the title of the
+  // currently printing page, |currentPage| is the current page number and
+  // |maxPages| is the total number of pages. Six default header locations are
+  // provided by the implementation: top left, top center, top right, bottom
+  // left, bottom center and bottom right. To use one of these default locations
+  // just assign a string to the appropriate variable. To draw the header and
+  // footer yourself return RV_HANDLED. Otherwise, populate the approprate
+  // variables and return RV_CONTINUE.
   enum cef_retval_t (CEF_CALLBACK *handle_print_header_footer)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       struct _cef_frame_t* frame, struct _cef_print_info_t* printInfo,
-      const wchar_t* url, const wchar_t* title, int currentPage, int maxPages,
-      cef_string_t* topLeft, cef_string_t* topCenter, cef_string_t* topRight,
-      cef_string_t* bottomLeft, cef_string_t* bottomCenter,
-      cef_string_t* bottomRight);
+      const cef_string_t* url, const cef_string_t* title, int currentPage,
+      int maxPages, cef_string_t* topLeft, cef_string_t* topCenter,
+      cef_string_t* topRight, cef_string_t* bottomLeft,
+      cef_string_t* bottomCenter, cef_string_t* bottomRight);
 
-  // Run a JS alert message.  Return RV_CONTINUE to display the default alert or
-  // RV_HANDLED if you displayed a custom alert.
+  // Called on the UI thread to run a JS alert message. Return RV_CONTINUE to
+  // display the default alert or RV_HANDLED if you displayed a custom alert.
   enum cef_retval_t (CEF_CALLBACK *handle_jsalert)(struct _cef_handler_t* self,
       struct _cef_browser_t* browser, struct _cef_frame_t* frame,
-      const wchar_t* message);
+      const cef_string_t* message);
 
-  // Run a JS confirm request.  Return RV_CONTINUE to display the default alert
-  // or RV_HANDLED if you displayed a custom alert.  If you handled the alert
-  // set |retval| to true (1) if the user accepted the confirmation.
+  // Called on the UI thread to run a JS confirm request. Return RV_CONTINUE to
+  // display the default alert or RV_HANDLED if you displayed a custom alert. If
+  // you handled the alert set |retval| to true (1) if the user accepted the
+  // confirmation.
   enum cef_retval_t (CEF_CALLBACK *handle_jsconfirm)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
-      struct _cef_frame_t* frame, const wchar_t* message, int* retval);
+      struct _cef_frame_t* frame, const cef_string_t* message, int* retval);
 
-  // Run a JS prompt request.  Return RV_CONTINUE to display the default prompt
-  // or RV_HANDLED if you displayed a custom prompt.  If you handled the prompt
-  // set |retval| to true (1) if the user accepted the prompt and request and
-  // |result| to the resulting value.
+  // Called on the UI thread to run a JS prompt request. Return RV_CONTINUE to
+  // display the default prompt or RV_HANDLED if you displayed a custom prompt.
+  // If you handled the prompt set |retval| to true (1) if the user accepted the
+  // prompt and request and |result| to the resulting value.
   enum cef_retval_t (CEF_CALLBACK *handle_jsprompt)(struct _cef_handler_t* self,
       struct _cef_browser_t* browser, struct _cef_frame_t* frame,
-      const wchar_t* message, const wchar_t* defaultValue, int* retval,
-      cef_string_t* result);
+      const cef_string_t* message, const cef_string_t* defaultValue,
+      int* retval, cef_string_t* result);
 
-  // Event called for adding values to a frame's JavaScript 'window' object. The
-  // return value is currently ignored.
+  // Called on the UI thread for adding values to a frame's JavaScript 'window'
+  // object. The return value is currently ignored.
   enum cef_retval_t (CEF_CALLBACK *handle_jsbinding)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       struct _cef_frame_t* frame, struct _cef_v8value_t* object);
 
-  // Called just before a window is closed. The return value is currently
-  // ignored.
+  // Called on the UI thread just before a window is closed. The return value is
+  // currently ignored.
   enum cef_retval_t (CEF_CALLBACK *handle_before_window_close)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser);
 
-  // Called when the browser component is about to loose focus. For instance, if
-  // focus was on the last HTML element and the user pressed the TAB key. The
-  // return value is currently ignored.
+  // Called on the UI thread when the browser component is about to loose focus.
+  // For instance, if focus was on the last HTML element and the user pressed
+  // the TAB key. The return value is currently ignored.
   enum cef_retval_t (CEF_CALLBACK *handle_take_focus)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       int reverse);
 
-  // Called when the browser component is requesting focus. |isWidget| will be
-  // true (1) if the focus is requested for a child widget of the browser
-  // window. Return RV_CONTINUE to allow the focus to be set or RV_HANDLED to
-  // cancel setting the focus.
+  // Called on the UI thread when the browser component is requesting focus.
+  // |isWidget| will be true (1) if the focus is requested for a child widget of
+  // the browser window. Return RV_CONTINUE to allow the focus to be set or
+  // RV_HANDLED to cancel setting the focus.
   enum cef_retval_t (CEF_CALLBACK *handle_set_focus)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       int isWidget);
 
-  // Called when the browser component receives a keyboard event. |type| is the
-  // type of keyboard event (see |KeyEventType|). |code| is the windows scan-
-  // code for the event. |modifiers| is a set of bit-flags describing any
-  // pressed modifier keys. |isSystemKey| is set if Windows considers this a
-  // 'system key' message;
-  //   (see http://msdn.microsoft.com/en-us/library/ms646286(VS.85).aspx)
-  // Return RV_HANDLED if the keyboard event was handled or RV_CONTINUE to allow
-  // the browser component to handle the event.
+  // Called on the UI thread when the browser component receives a keyboard
+  // event. |type| is the type of keyboard event, |code| is the windows scan-
+  // code for the event, |modifiers| is a set of bit-flags describing any
+  // pressed modifier keys and |isSystemKey| is true (1) if Windows considers
+  // this a 'system key' message (see http://msdn.microsoft.com/en-
+  // us/library/ms646286(VS.85).aspx). Return RV_HANDLED if the keyboard event
+  // was handled or RV_CONTINUE to allow the browser component to handle the
+  // event.
   enum cef_retval_t (CEF_CALLBACK *handle_key_event)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       enum cef_handler_keyevent_type_t type, int code, int modifiers,
       int isSystemKey);
 
-  // Event called when the browser is about to display a tooltip.  |text|
-  // contains the text that will be displayed in the tooltip.  To handle the
-  // display of the tooltip yourself return RV_HANDLED.  Otherwise, you can
+  // Called on the UI thread when the browser is about to display a tooltip.
+  // |text| contains the text that will be displayed in the tooltip. To handle
+  // the display of the tooltip yourself return RV_HANDLED. Otherwise, you can
   // optionally modify |text| and then return RV_CONTINUE to allow the browser
   // to display the tooltip.
   enum cef_retval_t (CEF_CALLBACK *handle_tooltip)(struct _cef_handler_t* self,
       struct _cef_browser_t* browser, cef_string_t* text);
 
-  // Called to display a console message. Return RV_HANDLED to stop the message
-  // from being output to the console.
+  // Called on the UI thread when the browser has a status message. |text|
+  // contains the text that will be displayed in the status message and |type|
+  // indicates the status message type. The return value is currently ignored.
+  enum cef_retval_t (CEF_CALLBACK *handle_status)(struct _cef_handler_t* self,
+      struct _cef_browser_t* browser, const cef_string_t* value,
+      enum cef_handler_statustype_t type);
+
+  // Called on the UI thread to display a console message. Return RV_HANDLED to
+  // stop the message from being output to the console.
   enum cef_retval_t (CEF_CALLBACK *handle_console_message)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
-      const wchar_t* message, const wchar_t* source, int line);
+      const cef_string_t* message, const cef_string_t* source, int line);
 
-  // Called to report find results returned by cef_browser_t::find().
-  // |identifer| is the identifier passed to cef_browser_t::find(), |count| is
-  // the number of matches currently identified, |selectionRect| is the location
-  // of where the match was found (in window coordinates), |activeMatchOrdinal|
-  // is the current position in the search results, and |finalUpdate| is true
-  // (1) if this is the last find notification.  The return value is currently
-  // ignored.
+  // Called on the UI thread to report find results returned by
+  // cef_browser_t::find(). |identifer| is the identifier passed to
+  // cef_browser_t::find(), |count| is the number of matches currently
+  // identified, |selectionRect| is the location of where the match was found
+  // (in window coordinates), |activeMatchOrdinal| is the current position in
+  // the search results, and |finalUpdate| is true (1) if this is the last find
+  // notification. The return value is currently ignored.
   enum cef_retval_t (CEF_CALLBACK *handle_find_result)(
       struct _cef_handler_t* self, struct _cef_browser_t* browser,
       int identifier, int count, const cef_rect_t* selectionRect,
@@ -597,23 +672,25 @@ typedef struct _cef_handler_t
 } cef_handler_t;
 
 
-// Structure used to represent a web request.
+// Structure used to represent a web request. The functions of this structure
+// may be called on any thread.
 typedef struct _cef_request_t
 {
   // Base structure.
   cef_base_t base;
 
   // Fully qualified URL to load.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_url)(struct _cef_request_t* self);
-  void (CEF_CALLBACK *set_url)(struct _cef_request_t* self, const wchar_t* url);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_url)(struct _cef_request_t* self);
+  void (CEF_CALLBACK *set_url)(struct _cef_request_t* self,
+      const cef_string_t* url);
 
   // Optional request function type, defaulting to POST if post data is provided
   // and GET otherwise.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_method)(struct _cef_request_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_method)(struct _cef_request_t* self);
   void (CEF_CALLBACK *set_method)(struct _cef_request_t* self,
-      const wchar_t* method);
+      const cef_string_t* method);
 
   // Optional post data.
   struct _cef_post_data_t* (CEF_CALLBACK *get_post_data)(
@@ -628,8 +705,8 @@ typedef struct _cef_request_t
       cef_string_map_t headerMap);
 
   // Set all values at one time.
-  void (CEF_CALLBACK *set)(struct _cef_request_t* self, const wchar_t* url,
-      const wchar_t* method, struct _cef_post_data_t* postData,
+  void (CEF_CALLBACK *set)(struct _cef_request_t* self, const cef_string_t* url,
+      const cef_string_t* method, struct _cef_post_data_t* postData,
       cef_string_map_t headerMap);
 
 } cef_request_t;
@@ -639,7 +716,8 @@ typedef struct _cef_request_t
 CEF_EXPORT cef_request_t* cef_request_create();
 
 
-// Structure used to represent post data for a web request.
+// Structure used to represent post data for a web request. The functions of
+// this structure may be called on any thread.
 typedef struct _cef_post_data_t
 {
   // Base structure.
@@ -671,7 +749,8 @@ typedef struct _cef_post_data_t
 CEF_EXPORT cef_post_data_t* cef_post_data_create();
 
 
-// Structure used to represent a single element in the request post data.
+// Structure used to represent a single element in the request post data. The
+// functions of this structure may be called on any thread.
 typedef struct _cef_post_data_element_t
 {
   // Base structure.
@@ -682,7 +761,7 @@ typedef struct _cef_post_data_element_t
 
   // The post data element will represent a file.
   void (CEF_CALLBACK *set_to_file)(struct _cef_post_data_element_t* self,
-      const wchar_t* fileName);
+      const cef_string_t* fileName);
 
   // The post data element will represent bytes.  The bytes passed in will be
   // copied.
@@ -694,8 +773,9 @@ typedef struct _cef_post_data_element_t
       struct _cef_post_data_element_t* self);
 
   // Return the file name.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_file)(struct _cef_post_data_element_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_file)(
+      struct _cef_post_data_element_t* self);
 
   // Return the number of bytes.
   size_t (CEF_CALLBACK *get_bytes_count)(struct _cef_post_data_element_t* self);
@@ -708,11 +788,12 @@ typedef struct _cef_post_data_element_t
 } cef_post_data_element_t;
 
 
-// Create a new cef_post_data_tElement object.
+// Create a new cef_post_data_element_t object.
 CEF_EXPORT cef_post_data_element_t* cef_post_data_element_create();
 
 
-// Structure the client can implement to provide a custom stream reader.
+// Structure the client can implement to provide a custom stream reader. The
+// functions of this structure may be called on any thread.
 typedef struct _cef_read_handler_t
 {
   // Base structure.
@@ -736,7 +817,8 @@ typedef struct _cef_read_handler_t
 } cef_read_handler_t;
 
 
-// Structure used to read data from a stream.
+// Structure used to read data from a stream. The functions of this structure
+// may be called on any thread.
 typedef struct _cef_stream_reader_t
 {
   // Base structure.
@@ -762,14 +844,15 @@ typedef struct _cef_stream_reader_t
 
 // Create a new cef_stream_reader_t object.
 CEF_EXPORT cef_stream_reader_t* cef_stream_reader_create_for_file(
-    const wchar_t* fileName);
+    const cef_string_t* fileName);
 CEF_EXPORT cef_stream_reader_t* cef_stream_reader_create_for_data(void* data,
     size_t size);
 CEF_EXPORT cef_stream_reader_t* cef_stream_reader_create_for_handler(
     cef_read_handler_t* handler);
 
 
-// Structure the client can implement to provide a custom stream writer.
+// Structure the client can implement to provide a custom stream writer. The
+// functions of this structure may be called on any thread.
 typedef struct _cef_write_handler_t
 {
   // Base structure.
@@ -793,7 +876,8 @@ typedef struct _cef_write_handler_t
 } cef_write_handler_t;
 
 
-// Structure used to write data to a stream.
+// Structure used to write data to a stream. The functions of this structure may
+// be called on any thread.
 typedef struct _cef_stream_writer_t
 {
   // Base structure.
@@ -819,12 +903,13 @@ typedef struct _cef_stream_writer_t
 
 // Create a new cef_stream_writer_t object.
 CEF_EXPORT cef_stream_writer_t* cef_stream_writer_create_for_file(
-    const wchar_t* fileName);
+    const cef_string_t* fileName);
 CEF_EXPORT cef_stream_writer_t* cef_stream_writer_create_for_handler(
     cef_write_handler_t* handler);
 
 
-// Structure that should be implemented to handle V8 function calls.
+// Structure that should be implemented to handle V8 function calls. The
+// functions of this structure will always be called on the UI thread.
 typedef struct _cef_v8handler_t
 {
   // Base structure.
@@ -833,14 +918,15 @@ typedef struct _cef_v8handler_t
   // Execute with the specified argument list and return value.  Return true (1)
   // if the function was handled.
   int (CEF_CALLBACK *execute)(struct _cef_v8handler_t* self,
-      const wchar_t* name, struct _cef_v8value_t* object, size_t argumentCount,
-      struct _cef_v8value_t* const* arguments, struct _cef_v8value_t** retval,
-      cef_string_t* exception);
+      const cef_string_t* name, struct _cef_v8value_t* object,
+      size_t argumentCount, struct _cef_v8value_t* const* arguments,
+      struct _cef_v8value_t** retval, cef_string_t* exception);
 
 } cef_v8handler_t;
 
 
-// Structure representing a V8 value.
+// Structure representing a V8 value. The functions of this structure should
+// only be called on the UI thread.
 typedef struct _cef_v8value_t
 {
   // Base structure.
@@ -862,8 +948,9 @@ typedef struct _cef_v8value_t
   int (CEF_CALLBACK *get_bool_value)(struct _cef_v8value_t* self);
   int (CEF_CALLBACK *get_int_value)(struct _cef_v8value_t* self);
   double (CEF_CALLBACK *get_double_value)(struct _cef_v8value_t* self);
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_string_value)(struct _cef_v8value_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_string_value)(
+      struct _cef_v8value_t* self);
 
 
   // OBJECT METHODS - These functions are only available on objects. Arrays and
@@ -873,24 +960,24 @@ typedef struct _cef_v8value_t
 
   // Returns true (1) if the object has a value with the specified identifier.
   int (CEF_CALLBACK *has_value_bykey)(struct _cef_v8value_t* self,
-      const wchar_t* key);
+      const cef_string_t* key);
   int (CEF_CALLBACK *has_value_byindex)(struct _cef_v8value_t* self, int index);
 
   // Delete the value with the specified identifier.
   int (CEF_CALLBACK *delete_value_bykey)(struct _cef_v8value_t* self,
-      const wchar_t* key);
+      const cef_string_t* key);
   int (CEF_CALLBACK *delete_value_byindex)(struct _cef_v8value_t* self,
       int index);
 
   // Returns the value with the specified identifier.
   struct _cef_v8value_t* (CEF_CALLBACK *get_value_bykey)(
-      struct _cef_v8value_t* self, const wchar_t* key);
+      struct _cef_v8value_t* self, const cef_string_t* key);
   struct _cef_v8value_t* (CEF_CALLBACK *get_value_byindex)(
       struct _cef_v8value_t* self, int index);
 
   // Associate value with the specified identifier.
   int (CEF_CALLBACK *set_value_bykey)(struct _cef_v8value_t* self,
-      const wchar_t* key, struct _cef_v8value_t* value);
+      const cef_string_t* key, struct _cef_v8value_t* value);
   int (CEF_CALLBACK *set_value_byindex)(struct _cef_v8value_t* self, int index,
       struct _cef_v8value_t* value);
 
@@ -913,8 +1000,9 @@ typedef struct _cef_v8value_t
   // FUNCTION METHODS - These functions are only available on functions.
 
   // Returns the function name.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_function_name)(struct _cef_v8value_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_function_name)(
+      struct _cef_v8value_t* self);
 
   // Returns the function handler or NULL if not a CEF-created function.
   struct _cef_v8handler_t* (CEF_CALLBACK *get_function_handler)(
@@ -938,14 +1026,15 @@ CEF_EXPORT cef_v8value_t* cef_v8value_create_null();
 CEF_EXPORT cef_v8value_t* cef_v8value_create_bool(int value);
 CEF_EXPORT cef_v8value_t* cef_v8value_create_int(int value);
 CEF_EXPORT cef_v8value_t* cef_v8value_create_double(double value);
-CEF_EXPORT cef_v8value_t* cef_v8value_create_string(const wchar_t* value);
+CEF_EXPORT cef_v8value_t* cef_v8value_create_string(const cef_string_t* value);
 CEF_EXPORT cef_v8value_t* cef_v8value_create_object(cef_base_t* user_data);
 CEF_EXPORT cef_v8value_t* cef_v8value_create_array();
-CEF_EXPORT cef_v8value_t* cef_v8value_create_function(const wchar_t* name,
+CEF_EXPORT cef_v8value_t* cef_v8value_create_function(const cef_string_t* name,
     cef_v8handler_t* handler);
 
 
-// Structure that creates cef_scheme_handler_t instances.
+// Structure that creates cef_scheme_handler_t instances. The functions of this
+// structure will always be called on the IO thread.
 typedef struct _cef_scheme_handler_factory_t
 {
   // Base structure.
@@ -958,7 +1047,8 @@ typedef struct _cef_scheme_handler_factory_t
 } cef_scheme_handler_factory_t;
 
 
-// Structure used to represent a custom scheme handler structure.
+// Structure used to represent a custom scheme handler structure. The functions
+// of this structure will always be called on the IO thread.
 typedef struct _cef_scheme_handler_t
 {
   // Base structure.
@@ -989,7 +1079,8 @@ typedef struct _cef_scheme_handler_t
 } cef_scheme_handler_t;
 
 
-// Structure used to handle file downloads.
+// Structure used to handle file downloads. The functions of this structure will
+// always be called on the UI thread.
 typedef struct _cef_download_handler_t
 {
   // Base structure.
@@ -1008,6 +1099,8 @@ typedef struct _cef_download_handler_t
 
 
 // Structure that supports the reading of XML data via the libxml streaming API.
+// The functions of this structure should only be called on the thread that
+// creates the object.
 typedef struct _cef_xml_reader_t
 {
   // Base structure.
@@ -1026,8 +1119,9 @@ typedef struct _cef_xml_reader_t
   int (CEF_CALLBACK *has_error)(struct _cef_xml_reader_t* self);
 
   // Returns the error string.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_error)(struct _cef_xml_reader_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_error)(
+      struct _cef_xml_reader_t* self);
 
 
   // The below functions retrieve data for the node at the current cursor
@@ -1042,35 +1136,39 @@ typedef struct _cef_xml_reader_t
 
   // Returns the local name. See http://www.w3.org/TR/REC-xml-names/#NT-
   // LocalPart for additional details.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_local_name)(struct _cef_xml_reader_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_local_name)(
+      struct _cef_xml_reader_t* self);
 
   // Returns the namespace prefix. See http://www.w3.org/TR/REC-xml-names/ for
   // additional details.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_prefix)(struct _cef_xml_reader_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_prefix)(
+      struct _cef_xml_reader_t* self);
 
   // Returns the qualified name, equal to (Prefix:)LocalName. See
   // http://www.w3.org/TR/REC-xml-names/#ns-qualnames for additional details.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_qualified_name)(
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_qualified_name)(
       struct _cef_xml_reader_t* self);
 
   // Returns the URI defining the namespace associated with the node. See
   // http://www.w3.org/TR/REC-xml-names/ for additional details.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_namespace_uri)(
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_namespace_uri)(
       struct _cef_xml_reader_t* self);
 
   // Returns the base URI of the node. See http://www.w3.org/TR/xmlbase/ for
   // additional details.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_base_uri)(struct _cef_xml_reader_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_base_uri)(
+      struct _cef_xml_reader_t* self);
 
   // Returns the xml:lang scope within which the node resides. See
   // http://www.w3.org/TR/REC-xml/#sec-lang-tag for additional details.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_xml_lang)(struct _cef_xml_reader_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_xml_lang)(
+      struct _cef_xml_reader_t* self);
 
   // Returns true (1) if the node represents an NULL element. <a/> is considered
   // NULL but <a></a> is not.
@@ -1080,8 +1178,9 @@ typedef struct _cef_xml_reader_t
   int (CEF_CALLBACK *has_value)(struct _cef_xml_reader_t* self);
 
   // Returns the text value.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_value)(struct _cef_xml_reader_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_value)(
+      struct _cef_xml_reader_t* self);
 
   // Returns true (1) if the node has attributes.
   int (CEF_CALLBACK *has_attributes)(struct _cef_xml_reader_t* self);
@@ -1090,29 +1189,31 @@ typedef struct _cef_xml_reader_t
   size_t (CEF_CALLBACK *get_attribute_count)(struct _cef_xml_reader_t* self);
 
   // Returns the value of the attribute at the specified 0-based index.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_attribute_byindex)(
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_attribute_byindex)(
       struct _cef_xml_reader_t* self, int index);
 
   // Returns the value of the attribute with the specified qualified name.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_attribute_byqname)(
-      struct _cef_xml_reader_t* self, const wchar_t* qualifiedName);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_attribute_byqname)(
+      struct _cef_xml_reader_t* self, const cef_string_t* qualifiedName);
 
   // Returns the value of the attribute with the specified local name and
   // namespace URI.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_attribute_bylname)(
-      struct _cef_xml_reader_t* self, const wchar_t* localName,
-      const wchar_t* namespaceURI);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_attribute_bylname)(
+      struct _cef_xml_reader_t* self, const cef_string_t* localName,
+      const cef_string_t* namespaceURI);
 
   // Returns an XML representation of the current node's children.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_inner_xml)(struct _cef_xml_reader_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_inner_xml)(
+      struct _cef_xml_reader_t* self);
 
   // Returns an XML representation of the current node including its children.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_outer_xml)(struct _cef_xml_reader_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_outer_xml)(
+      struct _cef_xml_reader_t* self);
 
   // Returns the line number for the current node.
   int (CEF_CALLBACK *get_line_number)(struct _cef_xml_reader_t* self);
@@ -1131,13 +1232,13 @@ typedef struct _cef_xml_reader_t
   // Moves the cursor to the attribute with the specified qualified name.
   // Returns true (1) if the cursor position was set successfully.
   int (CEF_CALLBACK *move_to_attribute_byqname)(struct _cef_xml_reader_t* self,
-      const wchar_t* qualifiedName);
+      const cef_string_t* qualifiedName);
 
   // Moves the cursor to the attribute with the specified local name and
   // namespace URI. Returns true (1) if the cursor position was set
   // successfully.
   int (CEF_CALLBACK *move_to_attribute_bylname)(struct _cef_xml_reader_t* self,
-      const wchar_t* localName, const wchar_t* namespaceURI);
+      const cef_string_t* localName, const cef_string_t* namespaceURI);
 
   // Moves the cursor to the first attribute in the current element. Returns
   // true (1) if the cursor position was set successfully.
@@ -1157,10 +1258,12 @@ typedef struct _cef_xml_reader_t
 // Create a new cef_xml_reader_t object. The returned object's functions can
 // only be called from the thread that created the object.
 CEF_EXPORT cef_xml_reader_t* cef_xml_reader_create(cef_stream_reader_t* stream,
-    enum cef_xml_encoding_type_t encodingType, const wchar_t* URI);
+    enum cef_xml_encoding_type_t encodingType, const cef_string_t* URI);
 
 
 // Structure that supports the reading of zip archives via the zlib unzip API.
+// The functions of this structure should only be called on the thread that
+// creates the object.
 typedef struct _cef_zip_reader_t
 {
   // Base structure.
@@ -1178,7 +1281,7 @@ typedef struct _cef_zip_reader_t
   // is true (1) then the search will be case sensitive. Returns true (1) if the
   // cursor position was set successfully.
   int (CEF_CALLBACK *move_to_file)(struct _cef_zip_reader_t* self,
-      const wchar_t* fileName, int caseSensitive);
+      const cef_string_t* fileName, int caseSensitive);
 
   // Closes the archive. This should be called directly to ensure that cleanup
   // occurs on the correct thread.
@@ -1188,8 +1291,9 @@ typedef struct _cef_zip_reader_t
   // The below functions act on the file at the current cursor position.
 
   // Returns the name of the file.
-  // The resulting string must be freed by calling cef_string_free().
-  cef_string_t (CEF_CALLBACK *get_file_name)(struct _cef_zip_reader_t* self);
+  // The resulting string must be freed by calling cef_string_userfree_free().
+  cef_string_userfree_t (CEF_CALLBACK *get_file_name)(
+      struct _cef_zip_reader_t* self);
 
   // Returns the uncompressed size of the file.
   long (CEF_CALLBACK *get_file_size)(struct _cef_zip_reader_t* self);
@@ -1200,7 +1304,7 @@ typedef struct _cef_zip_reader_t
   // Opens the file for reading of uncompressed data. A read password may
   // optionally be specified.
   int (CEF_CALLBACK *open_file)(struct _cef_zip_reader_t* self,
-      const wchar_t* password);
+      const cef_string_t* password);
 
   // Closes the file.
   int (CEF_CALLBACK *close_file)(struct _cef_zip_reader_t* self);

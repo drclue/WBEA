@@ -45,49 +45,48 @@
 #include "cef_types.h"
 
 class CefBrowser;
+class CefBrowserSettings;
 class CefDownloadHandler;
 class CefFrame;
 class CefHandler;
+class CefPopupFeatures;
 class CefPostData;
 class CefPostDataElement;
 class CefRequest;
 class CefSchemeHandler;
 class CefSchemeHandlerFactory;
+class CefSettings;
 class CefStreamReader;
 class CefStreamWriter;
 class CefTask;
+class CefURLParts;
 class CefV8Handler;
 class CefV8Value;
-class CefPopupFeatures;
 
 
-// This function should only be called once when the application is started.
-// Create the thread to host the UI message loop.  A return value of true
-// indicates that it succeeded and false indicates that it failed. Set
-// |multi_threaded_message_loop| to true to have the message loop run in
-// a separate thread.  If |multi_threaded_message_loop| is false than
-// the CefDoMessageLoopWork() function must be called from your message loop.
-// Set |cache_path| to the location where cache data will be stored on disk.
-// If |cache_path| is empty an in-memory cache will be used for cache data.
+// This function should be called on the main application thread to initialize
+// CEF when the application is started.  A return value of true indicates that
+// it succeeded and false indicates that it failed.
 /*--cef()--*/
-bool CefInitialize(bool multi_threaded_message_loop,
-                   const std::wstring& cache_path);
+bool CefInitialize(const CefSettings& settings,
+                   const CefBrowserSettings& browser_defaults);
 
-// This function should only be called once before the application exits.
-// Shut down the thread hosting the UI message loop and destroy any created
-// windows.
+// This function should be called on the main application thread to shut down
+// CEF before the application exits.
 /*--cef()--*/
 void CefShutdown();
 
-// Perform message loop processing.  Has no affect if the browser UI loop is
-// running in a separate thread.
+// Perform message loop processing. This function must be called on the main
+// application thread if CefInitialize() is called with a
+// CefSettings.multi_threaded_message_loop value of false.
 /*--cef()--*/
 void CefDoMessageLoopWork();
 
 // Register a new V8 extension with the specified JavaScript extension code and
 // handler. Functions implemented by the handler are prototyped using the
 // keyword 'native'. The calling of a native function is restricted to the scope
-// in which the prototype of the native function is defined.
+// in which the prototype of the native function is defined. This function may
+// be called on any thread.
 //
 // Example JavaScript extension code:
 //
@@ -141,18 +140,19 @@ void CefDoMessageLoopWork();
 //   example.test.increment();
 //
 /*--cef()--*/
-bool CefRegisterExtension(const std::wstring& extension_name,
-                          const std::wstring& javascript_code,
+bool CefRegisterExtension(const CefString& extension_name,
+                          const CefString& javascript_code,
                           CefRefPtr<CefV8Handler> handler);
 
 
 // Register a custom scheme handler factory for the specified |scheme_name| and
 // |host_name|. All URLs beginning with scheme_name://host_name/ can be handled
 // by CefSchemeHandler instances returned by the factory. Specify an empty
-// |host_name| value to match all host names.
+// |host_name| value to match all host names. This function may be called on any
+// thread.
 /*--cef()--*/
-bool CefRegisterScheme(const std::wstring& scheme_name,
-                       const std::wstring& host_name,
+bool CefRegisterScheme(const CefString& scheme_name,
+                       const CefString& host_name,
                        CefRefPtr<CefSchemeHandlerFactory> factory);
 
 
@@ -162,22 +162,36 @@ typedef cef_thread_id_t CefThreadId;
 // types of tasks. The UI thread creates the browser window and is used for all
 // interaction with the WebKit rendering engine and V8 JavaScript engine (The
 // UI thread will be the same as the main application thread if CefInitialize()
-// was called with a |multi_threaded_message_loop| value of false.) The IO
-// thread is used for handling schema and network requests. The FILE thread is
-// used for the application cache and other miscellaneous activities. This
-// method will return true if called on the specified thread.
+// is called with a CefSettings.multi_threaded_message_loop value of false.) The
+// IO thread is used for handling schema and network requests. The FILE thread
+// is used for the application cache and other miscellaneous activities. This
+// function will return true if called on the specified thread.
 /*--cef()--*/
 bool CefCurrentlyOn(CefThreadId threadId);
 
-// Post a task for execution on the specified thread.
+// Post a task for execution on the specified thread. This function may be
+// called on any thread.
 /*--cef()--*/
 bool CefPostTask(CefThreadId threadId, CefRefPtr<CefTask> task);
 
-// Post a task for delayed execution on the specified thread.
+// Post a task for delayed execution on the specified thread. This function may
+// be called on any thread.
 /*--cef()--*/
 bool CefPostDelayedTask(CefThreadId threadId, CefRefPtr<CefTask> task,
                         long delay_ms);
 
+// Parse the specified |url| into its component parts.
+// Returns false if the URL is empty or invalid.
+/*--cef()--*/
+bool CefParseURL(const CefString& url,
+                 CefURLParts& parts);
+
+// Creates a URL from the specified |parts|, which must contain a non-empty
+// spec or a non-empty host and path (at a minimum), but not both.
+// Returns false if |parts| isn't initialized as described.
+/*--cef()--*/
+bool CefCreateURL(const CefURLParts& parts,
+                  CefString& url);
 
 // Interface defining the the reference count implementation methods. All
 // framework classes must implement the CefBase class.
@@ -219,9 +233,9 @@ public:
 //
 // class MyHandler : public CefThreadSafeBase<CefHandler>
 // {
-//    std::wstring m_title;
+//    CefString m_title;
 //
-//    virtual RetVal HandleTitleChange(const std::wstring& title)
+//    virtual RetVal HandleTitleChange(const CefString& title)
 //    {
 //       Lock();   // Begin protecting code
 //       m_title = title;
@@ -333,7 +347,8 @@ inline bool operator!=(const CefRect& a, const CefRect& b)
   return !(a == b);
 }
 
-// Implement this interface for task execution.
+// Implement this interface for task execution. The methods of this class may
+// be called on any thread.
 /*--cef(source=client)--*/
 class CefTask : public CefBase
 {
@@ -344,31 +359,29 @@ public:
 };
 
 
-// Class used to represent a browser window.  All methods exposed by this class
-// should be thread safe.
+// Class used to represent a browser window. The methods of this class may be
+// called on any thread unless otherwise indicated in the comments.
 /*--cef(source=library)--*/
 class CefBrowser : public CefBase
 {
 public:
-  // Create a new browser window using the window parameters specified
-  // by |windowInfo|. All values will be copied internally and the actual
-  // window will be created on the UI thread.  The |popup| parameter should
-  // be true if the new window is a popup window. This method call will not
-  // block.
+  // Create a new browser window using the window parameters specified by
+  // |windowInfo|. All values will be copied internally and the actual window
+  // will be created on the UI thread. The |popup| parameter should be true if
+  // the new window is a popup window. This method call will not block.
   /*--cef()--*/
   static bool CreateBrowser(CefWindowInfo& windowInfo, bool popup,
                             CefRefPtr<CefHandler> handler,
-                            const std::wstring& url);
+                            const CefString& url);
 
-  // Create a new browser window using the window parameters specified
-  // by |windowInfo|. The |popup| parameter should be true if the new window is
-  // a popup window. This method call will block and can only be used if
-  // the |multi_threaded_message_loop| parameter to CefInitialize() is false.
+  // Create a new browser window using the window parameters specified by
+  // |windowInfo|. The |popup| parameter should be true if the new window is a
+  // popup window. This method should only be called on the UI thread.
   /*--cef()--*/
   static CefRefPtr<CefBrowser> CreateBrowserSync(CefWindowInfo& windowInfo,
                                                  bool popup,
                                                  CefRefPtr<CefHandler> handler,
-                                                 const std::wstring& url);
+                                                 const CefString& url);
 
   // Returns true if the browser can navigate backwards.
   /*--cef()--*/
@@ -392,8 +405,8 @@ public:
   /*--cef()--*/
   virtual void StopLoad() =0;
 
-  // Set focus for the browser window.  If |enable| is true focus will be set
-  // to the window.  Otherwise, focus will be removed.
+  // Set focus for the browser window. If |enable| is true focus will be set to
+  // the window. Otherwise, focus will be removed.
   /*--cef()--*/
   virtual void SetFocus(bool enable) =0;
 
@@ -413,17 +426,20 @@ public:
   /*--cef()--*/
   virtual CefRefPtr<CefFrame> GetMainFrame() =0;
 
-  // Returns the focused frame for the browser window.
+  // Returns the focused frame for the browser window. This method should only
+  // be called on the UI thread.
   /*--cef()--*/
   virtual CefRefPtr<CefFrame> GetFocusedFrame() =0;
 
-  // Returns the frame with the specified name, or NULL if not found.
+  // Returns the frame with the specified name, or NULL if not found. This
+  // method should only be called on the UI thread.
   /*--cef()--*/
-  virtual CefRefPtr<CefFrame> GetFrame(const std::wstring& name) =0;
+  virtual CefRefPtr<CefFrame> GetFrame(const CefString& name) =0;
 
-  // Returns the names of all existing frames.
+  // Returns the names of all existing frames. This method should only be called
+  // on the UI thread.
   /*--cef()--*/
-  virtual void GetFrameNames(std::vector<std::wstring>& names) =0;
+  virtual void GetFrameNames(std::vector<CefString>& names) =0;
 
   // Search for |searchText|. |identifier| can be used to have multiple searches
   // running simultaniously. |forward| indicates whether to search forward or
@@ -431,17 +447,34 @@ public:
   // be case-sensitive. |findNext| indicates whether this is the first request
   // or a follow-up.
   /*--cef()--*/
-  virtual void Find(int identifier, const std::wstring& searchText,
+  virtual void Find(int identifier, const CefString& searchText,
                     bool forward, bool matchCase, bool findNext) =0;
 
   // Cancel all searches that are currently going on.
   /*--cef()--*/
   virtual void StopFinding(bool clearSelection) =0;
+
+  // Get the zoom level.
+  /*--cef()--*/
+  virtual double GetZoomLevel() =0;
+
+  // Change the zoom level to the specified value.
+  /*--cef()--*/
+  virtual void SetZoomLevel(double zoomLevel) =0;
+
+  // Open developer tools in its own window.
+  /*--cef()--*/
+  virtual void ShowDevTools() =0;
+
+  // Explicitly close the developer tools window if one exists for this browser
+  // instance.
+  /*--cef()--*/
+  virtual void CloseDevTools() =0;
 };
 
 
-// Class used to represent a frame in the browser window.  All methods exposed
-// by this class should be thread safe.
+// Class used to represent a frame in the browser window. The methods of this
+// class may be called on any thread unless otherwise indicated in the comments.
 /*--cef(source=library)--*/
 class CefFrame : public CefBase
 {
@@ -478,13 +511,15 @@ public:
   /*--cef()--*/
   virtual void ViewSource() =0;
 
-  // Returns this frame's HTML source as a string.
+  // Returns this frame's HTML source as a string. This method should only be
+  // called on the UI thread.
   /*--cef()--*/
-  virtual std::wstring GetSource() =0;
+  virtual CefString GetSource() =0;
 
-  // Returns this frame's display text as a string.
+  // Returns this frame's display text as a string. This method should only be
+  // called on the UI thread.
   /*--cef()--*/
-  virtual std::wstring GetText() =0;
+  virtual CefString GetText() =0;
 
   // Load the request represented by the |request| object.
   /*--cef()--*/
@@ -492,17 +527,17 @@ public:
 
   // Load the specified |url|.
   /*--cef()--*/
-  virtual void LoadURL(const std::wstring& url) =0;
+  virtual void LoadURL(const CefString& url) =0;
   
   // Load the contents of |string| with the optional dummy target |url|.
   /*--cef()--*/
-  virtual void LoadString(const std::wstring& string,
-                          const std::wstring& url) =0;
+  virtual void LoadString(const CefString& string,
+                          const CefString& url) =0;
 
   // Load the contents of |stream| with the optional dummy target |url|.
   /*--cef()--*/
   virtual void LoadStream(CefRefPtr<CefStreamReader> stream,
-                          const std::wstring& url) =0;
+                          const CefString& url) =0;
 
   // Execute a string of JavaScript code in this frame. The |script_url|
   // parameter is the URL where the script in question can be found, if any.
@@ -510,31 +545,33 @@ public:
   // error.  The |start_line| parameter is the base line number to use for error
   // reporting.
   /*--cef()--*/
-  virtual void ExecuteJavaScript(const std::wstring& jsCode, 
-                                 const std::wstring& scriptUrl,
+  virtual void ExecuteJavaScript(const CefString& jsCode, 
+                                 const CefString& scriptUrl,
                                  int startLine) =0;
 
   // Returns true if this is the main frame.
   /*--cef()--*/
   virtual bool IsMain() =0;
 
-  // Returns true if this is the focused frame.
+  // Returns true if this is the focused frame. This method should only be
+  // called on the UI thread.
   /*--cef()--*/
   virtual bool IsFocused() =0;
 
   // Returns this frame's name.
   /*--cef()--*/
-  virtual std::wstring GetName() =0;
+  virtual CefString GetName() =0;
 
-  // Return the URL currently loaded in this frame.
+  // Return the URL currently loaded in this frame. This method should only be
+  // called on the UI thread.
   /*--cef()--*/
-  virtual std::wstring GetURL() =0;
+  virtual CefString GetURL() =0;
 };
 
 
 // Interface that should be implemented to handle events generated by the
-// browser window.  All methods exposed by this class should be thread safe.
-// Each method in the interface returns a RetVal value.
+// browser window. The methods of this class will be called on the thread
+// indicated in the method comments.
 /*--cef(source=client)--*/
 class CefHandler : public CefBase
 {
@@ -546,9 +583,9 @@ public:
   // should be called.
   typedef cef_retval_t RetVal;
 
-  // Event called before a new window is created. The |parentBrowser| parameter
-  // will point to the parent browser window, if any. The |popup| parameter
-  // will be true if the new window is a popup window, in which case
+  // Called on the UI thread before a new window is created. The |parentBrowser|
+  // parameter will point to the parent browser window, if any. The |popup|
+  // parameter will be true if the new window is a popup window, in which case
   // |popupFeatures| will contain information about the style of popup window
   // requested. If you create the window yourself you should populate the window
   // handle member of |createInfo| and return RV_HANDLED.  Otherwise, return
@@ -559,106 +596,142 @@ public:
   /*--cef()--*/
   virtual RetVal HandleBeforeCreated(CefRefPtr<CefBrowser> parentBrowser,
                                      CefWindowInfo& windowInfo, bool popup,
+                                     const CefPopupFeatures& popupFeatures,
                                      CefRefPtr<CefHandler>& handler,
-                                     std::wstring& url,
-                                     const CefPopupFeatures& popupFeatures) =0;
+                                     CefString& url,
+                                     CefBrowserSettings& settings) =0;
 
-  // Event called after a new window is created. The return value is currently
-  // ignored.
+  // Called on the UI thread after a new window is created. The return value is
+  // currently ignored.
   /*--cef()--*/
   virtual RetVal HandleAfterCreated(CefRefPtr<CefBrowser> browser) =0;
 
-  // Event called when a frame's address has changed. The return value is
-  // currently ignored.
+  // Called on the UI thread when a frame's address has changed. The return
+  // value is currently ignored.
   /*--cef()--*/
   virtual RetVal HandleAddressChange(CefRefPtr<CefBrowser> browser,
                                      CefRefPtr<CefFrame> frame,
-                                     const std::wstring& url) =0;
+                                     const CefString& url) =0;
 
-  // Event called when the page title changes. The return value is currently
-  // ignored.
+  // Called on the UI thread when the page title changes. The return value is
+  // currently ignored.
   /*--cef()--*/
   virtual RetVal HandleTitleChange(CefRefPtr<CefBrowser> browser,
-                                   const std::wstring& title) =0;
+                                   const CefString& title) =0;
 
   // Various browser navigation types supported by chrome.
   typedef cef_handler_navtype_t NavType;
 
-  // Event called before browser navigation. The client has an opportunity to
-  // modify the |request| object if desired.  Return RV_HANDLED to cancel
-  // navigation.
+  // Called on the UI thread before browser navigation. The client has an
+  // opportunity to modify the |request| object if desired.  Return RV_HANDLED
+  // to cancel navigation.
   /*--cef()--*/
   virtual RetVal HandleBeforeBrowse(CefRefPtr<CefBrowser> browser,
                                     CefRefPtr<CefFrame> frame,
                                     CefRefPtr<CefRequest> request,
                                     NavType navType, bool isRedirect) =0;
 
-  // Event called when the browser begins loading a page.  The |frame| pointer
-  // will be empty if the event represents the overall load status and not the
-  // load status for a particular frame.  The return value is currently ignored.
+  // Called on the UI thread when the browser begins loading a page. The |frame|
+  // pointer will be empty if the event represents the overall load status and
+  // not the load status for a particular frame. |isMainContent| will be true if
+  // this load is for the main content area and not an iframe. This method may
+  // not be called if the load request fails. The return value is currently
+  // ignored.
   /*--cef()--*/
   virtual RetVal HandleLoadStart(CefRefPtr<CefBrowser> browser,
-                                 CefRefPtr<CefFrame> frame) =0;
+                                 CefRefPtr<CefFrame> frame,
+                                 bool isMainContent) =0;
 
-  // Event called when the browser is done loading a page. The |frame| pointer
-  // will be empty if the event represents the overall load status and not the
-  // load status for a particular frame. This event will be generated
-  // irrespective of whether the request completes successfully. The return
-  // value is currently ignored.
+  // Called on the UI thread when the browser is done loading a page. The
+  // |frame| pointer will be empty if the event represents the overall load
+  // status and not the load status for a particular frame. |isMainContent| will
+  // be true if this load is for the main content area and not an iframe. This
+  // method will be called irrespective of whether the request completes
+  // successfully. The return value is currently ignored.
   /*--cef()--*/
   virtual RetVal HandleLoadEnd(CefRefPtr<CefBrowser> browser,
-                               CefRefPtr<CefFrame> frame) =0;
+                               CefRefPtr<CefFrame> frame,
+                               bool isMainContent,
+                               int httpStatusCode) =0;
 
   // Supported error code values. See net\base\net_error_list.h for complete
   // descriptions of the error codes.
   typedef cef_handler_errorcode_t ErrorCode;
 
-  // Called when the browser fails to load a resource.  |errorCode| is the
-  // error code number and |failedUrl| is the URL that failed to load.  To
-  // provide custom error text assign the text to |errorText| and return
-  // RV_HANDLED.  Otherwise, return RV_CONTINUE for the default error text.
+  // Called on the UI thread when the browser fails to load a resource.
+  // |errorCode| is the error code number and |failedUrl| is the URL that failed
+  // to load. To provide custom error text assign the text to |errorText| and
+  // return RV_HANDLED.  Otherwise, return RV_CONTINUE for the default error
+  // text.
   /*--cef()--*/
   virtual RetVal HandleLoadError(CefRefPtr<CefBrowser> browser,
                                  CefRefPtr<CefFrame> frame,
                                  ErrorCode errorCode,
-                                 const std::wstring& failedUrl,
-                                 std::wstring& errorText) =0;
+                                 const CefString& failedUrl,
+                                 CefString& errorText) =0;
 
-  // Event called before a resource is loaded.  To allow the resource to load
-  // normally return RV_CONTINUE. To redirect the resource to a new url
-  // populate the |redirectUrl| value and return RV_CONTINUE.  To specify
-  // data for the resource return a CefStream object in |resourceStream|, set
-  // |mimeType| to the resource stream's mime type, and return RV_CONTINUE.
-  // To cancel loading of the resource return RV_HANDLED.  Any modifications
-  // to |request| will be observed.  If the URL in |request| is changed and
+  // Called on the IO thread before a resource is loaded.  To allow the resource
+  // to load normally return RV_CONTINUE. To redirect the resource to a new url
+  // populate the |redirectUrl| value and return RV_CONTINUE.  To specify data
+  // for the resource return a CefStream object in |resourceStream|, set
+  // |mimeType| to the resource stream's mime type, and return RV_CONTINUE. To
+  // cancel loading of the resource return RV_HANDLED. Any modifications to
+  // |request| will be observed.  If the URL in |request| is changed and
   // |redirectUrl| is also set, the URL in |request| will be used.
   /*--cef()--*/
   virtual RetVal HandleBeforeResourceLoad(CefRefPtr<CefBrowser> browser,
-                                          CefRefPtr<CefRequest> request,
-                                          std::wstring& redirectUrl,
-                                          CefRefPtr<CefStreamReader>& resourceStream,
-                                          std::wstring& mimeType,
-                                          int loadFlags) =0;
+                                     CefRefPtr<CefRequest> request,
+                                     CefString& redirectUrl,
+                                     CefRefPtr<CefStreamReader>& resourceStream,
+                                     CefString& mimeType,
+                                     int loadFlags) =0;
 
-  // Called when a server indicates via the 'Content-Disposition' header that a
-  // response represents a file to download. |mimeType| is the mime type for
-  // the download, |fileName| is the suggested target file name and
-  // |contentLength| is either the value of the 'Content-Size' header or -1 if
-  // no size was provided. Set |handler| to the CefDownloadHandler instance that
-  // will recieve the file contents.  Return RV_CONTINUE to download the file
-  // or RV_HANDLED to cancel the file download.
+  // Called on the IO thread to handle requests for URLs with an unknown
+  // protocol component. Return RV_HANDLED to indicate that the request should
+  // succeed because it was externally handled. Set |allow_os_execution| to true
+  // and return RV_CONTINUE to attempt execution via the registered OS protocol
+  // handler, if any. If RV_CONTINUE is returned and either |allow_os_execution|
+  // is false or OS protocol handler execution fails then the request will fail
+  // with an error condition.
+  // SECURITY WARNING: YOU SHOULD USE THIS METHOD TO ENFORCE RESTRICTIONS BASED
+  // ON SCHEME, HOST OR OTHER URL ANALYSIS BEFORE ALLOWING OS EXECUTION.
+  /*--cef()--*/
+  virtual RetVal HandleProtocolExecution(CefRefPtr<CefBrowser> browser,
+                                         const CefString& url,
+                                         bool* allow_os_execution) =0;
+
+  // Called on the UI thread when a server indicates via the
+  // 'Content-Disposition' header that a response represents a file to download.
+  // |mimeType| is the mime type for the download, |fileName| is the suggested
+  // target file name and |contentLength| is either the value of the
+  // 'Content-Size' header or -1 if no size was provided. Set |handler| to the
+  // CefDownloadHandler instance that will recieve the file contents. Return
+  // RV_CONTINUE to download the file or RV_HANDLED to cancel the file download.
   /*--cef()--*/
   virtual RetVal HandleDownloadResponse(CefRefPtr<CefBrowser> browser,
-                                    const std::wstring& mimeType,
-                                    const std::wstring& fileName,
+                                    const CefString& mimeType,
+                                    const CefString& fileName,
                                     int64 contentLength,
                                     CefRefPtr<CefDownloadHandler>& handler) =0;
+
+  // Called on the IO thread when the browser needs credentials from the user.
+  // |isProxy| indicates whether the host is a proxy server. |host| contains the
+  // hostname and port number. Set |username| and |password| and return
+  // RV_HANDLED to handle the request. Return RV_CONTINUE to cancel the request.
+  /*--cef()--*/
+  virtual RetVal HandleAuthenticationRequest(CefRefPtr<CefBrowser> browser,
+                                             bool isProxy,
+                                             const CefString& host,
+                                             const CefString& realm,
+                                             const CefString& scheme,
+                                             CefString& username,
+                                             CefString& password) =0;
 
   // Structure representing menu information.
   typedef cef_handler_menuinfo_t MenuInfo;
 
-  // Event called before a context menu is displayed.  To cancel display of the
-  // default context menu return RV_HANDLED.
+  // Called on the UI thread before a context menu is displayed. To cancel
+  // display of the default context menu return RV_HANDLED.
   /*--cef()--*/
   virtual RetVal HandleBeforeMenu(CefRefPtr<CefBrowser> browser,
                                   const MenuInfo& menuInfo) =0;
@@ -666,15 +739,15 @@ public:
   // Supported menu ID values.
   typedef cef_handler_menuid_t MenuId;
 
-  // Event called to optionally override the default text for a context menu
-  // item.  |label| contains the default text and may be modified to substitute
-  // alternate text.  The return value is currently ignored.
+  // Called on the UI thread to optionally override the default text for a
+  // context menu item. |label| contains the default text and may be modified to
+  // substitute alternate text. The return value is currently ignored.
   /*--cef()--*/
   virtual RetVal HandleGetMenuLabel(CefRefPtr<CefBrowser> browser,
-                                    MenuId menuId, std::wstring& label) =0;
+                                    MenuId menuId, CefString& label) =0;
 
-  // Event called when an option is selected from the default context menu.
-  // Return RV_HANDLED to cancel default handling of the action.
+  // Called on the UI thread when an option is selected from the default context
+  // menu. Return RV_HANDLED to cancel default handling of the action.
   /*--cef()--*/
   virtual RetVal HandleMenuAction(CefRefPtr<CefBrowser> browser,
                                   MenuId menuId) =0;
@@ -682,90 +755,91 @@ public:
   // Structure representing print options.
   typedef cef_print_options_t CefPrintOptions;
   
-  // Event called to allow customization of standard print options before the
-  // print dialog is displayed. |printOptions| allows specification of paper
-  // size, orientation and margins. Note that the specified margins may be
-  // adjusted if they are outside the range supported by the printer. All units
-  // are in inches. Return RV_CONTINUE to display the default print options or
-  // RV_HANDLED to display the modified |printOptions|.
+  // Called on the UI thread to allow customization of standard print options
+  // before the print dialog is displayed. |printOptions| allows specification
+  // of paper size, orientation and margins. Note that the specified margins may
+  // be adjusted if they are outside the range supported by the printer. All
+  // units are in inches. Return RV_CONTINUE to display the default print
+  // options or RV_HANDLED to display the modified |printOptions|.
   /*--cef()--*/
   virtual RetVal HandlePrintOptions(CefRefPtr<CefBrowser> browser,
                                     CefPrintOptions& printOptions) = 0;
 
-  // Event called to format print headers and footers.  |printInfo| contains
-  // platform-specific information about the printer context.  |url| is the
-  // URL if the currently printing page, |title| is the title of the currently
-  // printing page, |currentPage| is the current page number and |maxPages| is
-  // the total number of pages.  Six default header locations are provided
-  // by the implementation: top left, top center, top right, bottom left,
-  // bottom center and bottom right.  To use one of these default locations
-  // just assign a string to the appropriate variable.  To draw the header
-  // and footer yourself return RV_HANDLED.  Otherwise, populate the approprate
+  // Called on the UI thread to format print headers and footers. |printInfo|
+  // contains platform-specific information about the printer context. |url| is
+  // the URL if the currently printing page, |title| is the title of the
+  // currently printing page, |currentPage| is the current page number and
+  // |maxPages| is the total number of pages. Six default header locations are
+  // provided by the implementation: top left, top center, top right, bottom
+  // left, bottom center and bottom right. To use one of these default locations
+  // just assign a string to the appropriate variable. To draw the header and
+  // footer yourself return RV_HANDLED. Otherwise, populate the approprate
   // variables and return RV_CONTINUE.
   /*--cef()--*/
   virtual RetVal HandlePrintHeaderFooter(CefRefPtr<CefBrowser> browser,
                                          CefRefPtr<CefFrame> frame,
                                          CefPrintInfo& printInfo,
-                                         const std::wstring& url,
-                                         const std::wstring& title,
+                                         const CefString& url,
+                                         const CefString& title,
                                          int currentPage, int maxPages,
-                                         std::wstring& topLeft,
-                                         std::wstring& topCenter,
-                                         std::wstring& topRight,
-                                         std::wstring& bottomLeft,
-                                         std::wstring& bottomCenter,
-                                         std::wstring& bottomRight) =0;
+                                         CefString& topLeft,
+                                         CefString& topCenter,
+                                         CefString& topRight,
+                                         CefString& bottomLeft,
+                                         CefString& bottomCenter,
+                                         CefString& bottomRight) =0;
 
-  // Run a JS alert message.  Return RV_CONTINUE to display the default alert
-  // or RV_HANDLED if you displayed a custom alert.
+  // Called on the UI thread to run a JS alert message. Return RV_CONTINUE to
+  // display the default alert or RV_HANDLED if you displayed a custom alert.
   /*--cef()--*/
   virtual RetVal HandleJSAlert(CefRefPtr<CefBrowser> browser,
                                CefRefPtr<CefFrame> frame,
-                               const std::wstring& message) =0;
+                               const CefString& message) =0;
 
-  // Run a JS confirm request.  Return RV_CONTINUE to display the default alert
-  // or RV_HANDLED if you displayed a custom alert.  If you handled the alert
-  // set |retval| to true if the user accepted the confirmation.
+  // Called on the UI thread to run a JS confirm request. Return RV_CONTINUE to
+  // display the default alert or RV_HANDLED if you displayed a custom alert. If
+  // you handled the alert set |retval| to true if the user accepted the
+  // confirmation.
   /*--cef()--*/
   virtual RetVal HandleJSConfirm(CefRefPtr<CefBrowser> browser,
                                  CefRefPtr<CefFrame> frame,
-                                 const std::wstring& message, bool& retval) =0;
+                                 const CefString& message, bool& retval) =0;
 
-  // Run a JS prompt request.  Return RV_CONTINUE to display the default prompt
-  // or RV_HANDLED if you displayed a custom prompt.  If you handled the prompt
-  // set |retval| to true if the user accepted the prompt and request and
-  // |result| to the resulting value.
+  // Called on the UI thread to run a JS prompt request. Return RV_CONTINUE to
+  // display the default prompt or RV_HANDLED if you displayed a custom prompt.
+  // If you handled the prompt set |retval| to true if the user accepted the
+  // prompt and request and |result| to the resulting value.
   /*--cef()--*/
   virtual RetVal HandleJSPrompt(CefRefPtr<CefBrowser> browser,
                                 CefRefPtr<CefFrame> frame,
-                                const std::wstring& message,
-                                const std::wstring& defaultValue,
+                                const CefString& message,
+                                const CefString& defaultValue,
                                 bool& retval,
-                                std::wstring& result) =0;
+                                CefString& result) =0;
 
-  // Event called for adding values to a frame's JavaScript 'window' object. The
-  // return value is currently ignored.
+  // Called on the UI thread for adding values to a frame's JavaScript 'window'
+  // object. The return value is currently ignored.
   /*--cef()--*/
   virtual RetVal HandleJSBinding(CefRefPtr<CefBrowser> browser,
                                  CefRefPtr<CefFrame> frame,
                                  CefRefPtr<CefV8Value> object) =0;
 
-  // Called just before a window is closed. The return value is currently
-  // ignored.
+  // Called on the UI thread just before a window is closed. The return value is
+  // currently ignored.
   /*--cef()--*/
   virtual RetVal HandleBeforeWindowClose(CefRefPtr<CefBrowser> browser) =0;
 
-  // Called when the browser component is about to loose focus. For instance,
-  // if focus was on the last HTML element and the user pressed the TAB key.
-  // The return value is currently ignored.
+  // Called on the UI thread when the browser component is about to loose focus.
+  // For instance, if focus was on the last HTML element and the user pressed
+  // the TAB key. The return value is currently ignored.
   /*--cef()--*/
   virtual RetVal HandleTakeFocus(CefRefPtr<CefBrowser> browser,
                                  bool reverse) =0;
 
-  // Called when the browser component is requesting focus. |isWidget| will be
-  // true if the focus is requested for a child widget of the browser window.
-  // Return RV_CONTINUE to allow the focus to be set or RV_HANDLED to cancel
-  // setting the focus.
+  // Called on the UI thread when the browser component is requesting focus.
+  // |isWidget| will be true if the focus is requested for a child widget of the
+  // browser window. Return RV_CONTINUE to allow the focus to be set or
+  // RV_HANDLED to cancel setting the focus.
   /*--cef()--*/
   virtual RetVal HandleSetFocus(CefRefPtr<CefBrowser> browser,
                                 bool isWidget) =0;
@@ -773,14 +847,14 @@ public:
   // Supported keyboard event types.
   typedef cef_handler_keyevent_type_t KeyEventType;
 
-  // Called when the browser component receives a keyboard event.
-  // |type| is the type of keyboard event (see |KeyEventType|).
-  // |code| is the windows scan-code for the event.
-  // |modifiers| is a set of bit-flags describing any pressed modifier keys.
-  // |isSystemKey| is set if Windows considers this a 'system key' message;
-  //   (see http://msdn.microsoft.com/en-us/library/ms646286(VS.85).aspx)
-  // Return RV_HANDLED if the keyboard event was handled or RV_CONTINUE
-  // to allow the browser component to handle the event.
+  // Called on the UI thread when the browser component receives a keyboard
+  // event. |type| is the type of keyboard event, |code| is the windows scan-
+  // code for the event, |modifiers| is a set of bit-flags describing any
+  // pressed modifier keys and |isSystemKey| is true if Windows considers this a
+  // 'system key' message (see
+  // http://msdn.microsoft.com/en-us/library/ms646286(VS.85).aspx). Return
+  // RV_HANDLED if the keyboard event was handled or RV_CONTINUE to allow the
+  // browser component to handle the event.
   /*--cef()--*/
   virtual RetVal HandleKeyEvent(CefRefPtr<CefBrowser> browser,
                                 KeyEventType type,
@@ -788,28 +862,40 @@ public:
                                 int modifiers,
                                 bool isSystemKey) =0;
 
-  // Event called when the browser is about to display a tooltip.  |text|
-  // contains the text that will be displayed in the tooltip.  To handle
-  // the display of the tooltip yourself return RV_HANDLED.  Otherwise,
-  // you can optionally modify |text| and then return RV_CONTINUE to allow
-  // the browser to display the tooltip.
+  // Called on the UI thread when the browser is about to display a tooltip.
+  // |text| contains the text that will be displayed in the tooltip. To handle
+  // the display of the tooltip yourself return RV_HANDLED. Otherwise, you can
+  // optionally modify |text| and then return RV_CONTINUE to allow the browser
+  // to display the tooltip.
   /*--cef()--*/
   virtual RetVal HandleTooltip(CefRefPtr<CefBrowser> browser,
-                               std::wstring& text) =0;
+                               CefString& text) =0;
+  
+  // Status message types.
+  typedef cef_handler_statustype_t StatusType;
 
-  // Called to display a console message. Return RV_HANDLED to stop the message
-  // from being output to the console.
+  // Called on the UI thread when the browser has a status message. |text|
+  // contains the text that will be displayed in the status message and |type|
+  // indicates the status message type. The return value is currently ignored.
+  /*--cef()--*/
+  virtual RetVal HandleStatus(CefRefPtr<CefBrowser> browser,
+                              const CefString& value, 
+                              StatusType type) =0;
+
+  // Called on the UI thread to display a console message. Return RV_HANDLED to
+  // stop the message from being output to the console.
   /*--cef()--*/
   virtual RetVal HandleConsoleMessage(CefRefPtr<CefBrowser> browser,
-                                      const std::wstring& message,
-                                      const std::wstring& source, int line) =0;
+                                      const CefString& message,
+                                      const CefString& source, int line) =0;
 
-  // Called to report find results returned by CefBrowser::Find(). |identifer|
-  // is the identifier passed to CefBrowser::Find(), |count| is the number of
-  // matches currently identified, |selectionRect| is the location of where the
-  // match was found (in window coordinates), |activeMatchOrdinal| is the
-  // current position in the search results, and |finalUpdate| is true if this
-  // is the last find notification.  The return value is currently ignored.
+  // Called on the UI thread to report find results returned by
+  // CefBrowser::Find(). |identifer| is the identifier passed to
+  // CefBrowser::Find(), |count| is the number of matches currently identified,
+  // |selectionRect| is the location of where the match was found (in window
+  // coordinates), |activeMatchOrdinal| is the current position in the search
+  // results, and |finalUpdate| is true if this is the last find notification.
+  // The return value is currently ignored.
   /*--cef()--*/
   virtual RetVal HandleFindResult(CefRefPtr<CefBrowser> browser,
                                   int identifier, int count,
@@ -818,12 +904,13 @@ public:
 };
 
 
-// Class used to represent a web request.
+// Class used to represent a web request. The methods of this class may be
+// called on any thread.
 /*--cef(source=library)--*/
 class CefRequest : public CefBase
 {
 public:
-  typedef std::map<std::wstring,std::wstring> HeaderMap;
+  typedef std::map<CefString,CefString> HeaderMap;
 
   // Create a new CefRequest object.
   /*--cef()--*/
@@ -831,16 +918,16 @@ public:
 
   // Fully qualified URL to load.
   /*--cef()--*/
-  virtual std::wstring GetURL() =0;
+  virtual CefString GetURL() =0;
   /*--cef()--*/
-  virtual void SetURL(const std::wstring& url) =0;
+  virtual void SetURL(const CefString& url) =0;
 
   // Optional request method type, defaulting to POST if post data is provided
   // and GET otherwise.
   /*--cef()--*/
-  virtual std::wstring GetMethod() =0;
+  virtual CefString GetMethod() =0;
   /*--cef()--*/
-  virtual void SetMethod(const std::wstring& method) =0;
+  virtual void SetMethod(const CefString& method) =0;
 
   // Optional post data.
   /*--cef()--*/
@@ -856,14 +943,15 @@ public:
 
   // Set all values at one time.
   /*--cef()--*/
-  virtual void Set(const std::wstring& url,
-                   const std::wstring& method,
+  virtual void Set(const CefString& url,
+                   const CefString& method,
                    CefRefPtr<CefPostData> postData,
                    const HeaderMap& headerMap) =0;
 };
 
 
-// Class used to represent post data for a web request.
+// Class used to represent post data for a web request. The methods of this
+// class may be called on any thread.
 /*--cef(source=library)--*/
 class CefPostData : public CefBase
 {
@@ -897,7 +985,8 @@ public:
 };
 
 
-// Class used to represent a single element in the request post data.
+// Class used to represent a single element in the request post data. The
+// methods of this class may be called on any thread.
 /*--cef(source=library)--*/
 class CefPostDataElement : public CefBase
 {
@@ -915,7 +1004,7 @@ public:
 
   // The post data element will represent a file.
   /*--cef()--*/
-  virtual void SetToFile(const std::wstring& fileName) =0;
+  virtual void SetToFile(const CefString& fileName) =0;
 
   // The post data element will represent bytes.  The bytes passed
   // in will be copied.
@@ -928,7 +1017,7 @@ public:
 
   // Return the file name.
   /*--cef()--*/
-  virtual std::wstring GetFile() =0;
+  virtual CefString GetFile() =0;
 
   // Return the number of bytes.
   /*--cef()--*/
@@ -941,7 +1030,8 @@ public:
 };
 
 
-// Interface the client can implement to provide a custom stream reader.
+// Interface the client can implement to provide a custom stream reader. The
+// methods of this class may be called on any thread.
 /*--cef(source=client)--*/
 class CefReadHandler : public CefBase
 {
@@ -965,18 +1055,20 @@ public:
 };
 
 
-// Class used to read data from a stream.
+// Class used to read data from a stream. The methods of this class may be
+// called on any thread.
 /*--cef(source=library)--*/
 class CefStreamReader : public CefBase
 {
 public:
   // Create a new CefStreamReader object.
   /*--cef()--*/
-  static CefRefPtr<CefStreamReader> CreateForFile(const std::wstring& fileName);
+  static CefRefPtr<CefStreamReader> CreateForFile(const CefString& fileName);
   /*--cef()--*/
   static CefRefPtr<CefStreamReader> CreateForData(void* data, size_t size);
    /*--cef()--*/
-  static CefRefPtr<CefStreamReader> CreateForHandler(CefRefPtr<CefReadHandler> handler);
+  static CefRefPtr<CefStreamReader> CreateForHandler(
+      CefRefPtr<CefReadHandler> handler);
 
   // Read raw binary data.
   /*--cef()--*/
@@ -998,7 +1090,8 @@ public:
 };
 
 
-// Interface the client can implement to provide a custom stream writer.
+// Interface the client can implement to provide a custom stream writer. The
+// methods of this class may be called on any thread.
 /*--cef(source=client)--*/
 class CefWriteHandler : public CefBase
 {
@@ -1022,16 +1115,18 @@ public:
 };
 
 
-// Class used to write data to a stream.
+// Class used to write data to a stream. The methods of this class may be called
+// on any thread.
 /*--cef(source=library)--*/
 class CefStreamWriter : public CefBase
 {
 public:
   // Create a new CefStreamWriter object.
   /*--cef()--*/
-  static CefRefPtr<CefStreamWriter> CreateForFile(const std::wstring& fileName);
+  static CefRefPtr<CefStreamWriter> CreateForFile(const CefString& fileName);
   /*--cef()--*/
-  static CefRefPtr<CefStreamWriter> CreateForHandler(CefRefPtr<CefWriteHandler> handler);
+  static CefRefPtr<CefStreamWriter> CreateForHandler(
+      CefRefPtr<CefWriteHandler> handler);
 
   // Write raw binary data.
   /*--cef()--*/
@@ -1054,7 +1149,8 @@ public:
 
 typedef std::vector<CefRefPtr<CefV8Value> > CefV8ValueList;
 
-// Interface that should be implemented to handle V8 function calls.
+// Interface that should be implemented to handle V8 function calls. The methods
+// of this class will always be called on the UI thread.
 /*--cef(source=client)--*/
 class CefV8Handler : public CefBase
 {
@@ -1062,15 +1158,16 @@ public:
   // Execute with the specified argument list and return value.  Return true if
   // the method was handled.
   /*--cef()--*/
-  virtual bool Execute(const std::wstring& name,
+  virtual bool Execute(const CefString& name,
                        CefRefPtr<CefV8Value> object,
                        const CefV8ValueList& arguments,
                        CefRefPtr<CefV8Value>& retval,
-                       std::wstring& exception) =0;
+                       CefString& exception) =0;
 };
 
 
-// Class representing a V8 value.
+// Class representing a V8 value. The methods of this class should only be
+// called on the UI thread.
 /*--cef(source=library)--*/
 class CefV8Value : public CefBase
 {
@@ -1090,13 +1187,13 @@ public:
   /*--cef()--*/
   static CefRefPtr<CefV8Value> CreateDouble(double value);
   /*--cef()--*/
-  static CefRefPtr<CefV8Value> CreateString(const std::wstring& value);
+  static CefRefPtr<CefV8Value> CreateString(const CefString& value);
   /*--cef()--*/
   static CefRefPtr<CefV8Value> CreateObject(CefRefPtr<CefBase> user_data);
   /*--cef()--*/
   static CefRefPtr<CefV8Value> CreateArray();
   /*--cef()--*/
-  static CefRefPtr<CefV8Value> CreateFunction(const std::wstring& name,
+  static CefRefPtr<CefV8Value> CreateFunction(const CefString& name,
                                               CefRefPtr<CefV8Handler> handler);
 
   // Check the value type.
@@ -1128,7 +1225,7 @@ public:
   /*--cef()--*/
   virtual double GetDoubleValue() =0;
   /*--cef()--*/
-  virtual std::wstring GetStringValue() =0;
+  virtual CefString GetStringValue() =0;
 
 
   // OBJECT METHODS - These methods are only available on objects. Arrays and
@@ -1138,32 +1235,32 @@ public:
 
   // Returns true if the object has a value with the specified identifier.
   /*--cef(capi_name=has_value_bykey)--*/
-  virtual bool HasValue(const std::wstring& key) =0;
+  virtual bool HasValue(const CefString& key) =0;
   /*--cef(capi_name=has_value_byindex)--*/
   virtual bool HasValue(int index) =0;
 
   // Delete the value with the specified identifier.
   /*--cef(capi_name=delete_value_bykey)--*/
-  virtual bool DeleteValue(const std::wstring& key) =0;
+  virtual bool DeleteValue(const CefString& key) =0;
   /*--cef(capi_name=delete_value_byindex)--*/
   virtual bool DeleteValue(int index) =0;
 
   // Returns the value with the specified identifier.
   /*--cef(capi_name=get_value_bykey)--*/
-  virtual CefRefPtr<CefV8Value> GetValue(const std::wstring& key) =0;
+  virtual CefRefPtr<CefV8Value> GetValue(const CefString& key) =0;
   /*--cef(capi_name=get_value_byindex)--*/
   virtual CefRefPtr<CefV8Value> GetValue(int index) =0;
 
   // Associate value with the specified identifier.
   /*--cef(capi_name=set_value_bykey)--*/
-  virtual bool SetValue(const std::wstring& key, CefRefPtr<CefV8Value> value) =0;
+  virtual bool SetValue(const CefString& key, CefRefPtr<CefV8Value> value) =0;
   /*--cef(capi_name=set_value_byindex)--*/
   virtual bool SetValue(int index, CefRefPtr<CefV8Value> value) =0;
 
   // Read the keys for the object's values into the specified vector. Integer-
   // based keys will also be returned as strings.
   /*--cef()--*/
-  virtual bool GetKeys(std::vector<std::wstring>& keys) =0;
+  virtual bool GetKeys(std::vector<CefString>& keys) =0;
 
   // Returns the user data, if any, specified when the object was created.
   /*--cef()--*/
@@ -1181,7 +1278,7 @@ public:
 
   // Returns the function name.
   /*--cef()--*/
-  virtual std::wstring GetFunctionName() =0;
+  virtual CefString GetFunctionName() =0;
 
   // Returns the function handler or NULL if not a CEF-created function.
   /*--cef()--*/
@@ -1192,11 +1289,12 @@ public:
   virtual bool ExecuteFunction(CefRefPtr<CefV8Value> object,
                                const CefV8ValueList& arguments,
                                CefRefPtr<CefV8Value>& retval,
-                               std::wstring& exception) =0;
+                               CefString& exception) =0;
 };
 
 
-// Class that creates CefSchemeHandler instances.
+// Class that creates CefSchemeHandler instances. The methods of this class will
+// always be called on the IO thread.
 /*--cef(source=client)--*/
 class CefSchemeHandlerFactory : public CefBase
 {
@@ -1207,7 +1305,8 @@ public:
 };
 
 
-// Class used to represent a custom scheme handler interface.
+// Class used to represent a custom scheme handler interface. The methods of
+// this class will always be called on the IO thread.
 /*--cef(source=client)--*/
 class CefSchemeHandler : public CefBase
 {
@@ -1223,7 +1322,7 @@ public:
   // |mime_type| to the mime type for the response.
   /*--cef()--*/
   virtual bool ProcessRequest(CefRefPtr<CefRequest> request,
-                              std::wstring& mime_type, int* response_length) =0;
+                              CefString& mime_type, int* response_length) =0;
 
   // Cancel processing of the request.
   /*--cef()--*/
@@ -1238,7 +1337,8 @@ public:
 };
 
 
-// Class used to handle file downloads.
+// Class used to handle file downloads. The methods of this class will always be
+// called on the UI thread.
 /*--cef(source=client)--*/
 class CefDownloadHandler : public CefBase
 {
@@ -1256,6 +1356,8 @@ public:
 
 
 // Class that supports the reading of XML data via the libxml streaming API.
+// The methods of this class should only be called on the thread that creates
+// the object.
 /*--cef(source=library)--*/
 class CefXmlReader : public CefBase
 {
@@ -1268,7 +1370,7 @@ public:
   /*--cef()--*/
   static CefRefPtr<CefXmlReader> Create(CefRefPtr<CefStreamReader> stream,
                                         EncodingType encodingType,
-                                        const std::wstring& URI);
+                                        const CefString& URI);
 
   // Moves the cursor to the next node in the document. This method must be
   // called at least once to set the current cursor position. Returns true if
@@ -1287,7 +1389,7 @@ public:
 
   // Returns the error string.
   /*--cef()--*/
-  virtual std::wstring GetError() =0;
+  virtual CefString GetError() =0;
 
 
   // The below methods retrieve data for the node at the current cursor
@@ -1304,32 +1406,32 @@ public:
   // Returns the local name. See
   // http://www.w3.org/TR/REC-xml-names/#NT-LocalPart for additional details.
   /*--cef()--*/
-  virtual std::wstring GetLocalName() =0;
+  virtual CefString GetLocalName() =0;
 
   // Returns the namespace prefix. See http://www.w3.org/TR/REC-xml-names/ for
   // additional details.
   /*--cef()--*/
-  virtual std::wstring GetPrefix() =0;
+  virtual CefString GetPrefix() =0;
 
   // Returns the qualified name, equal to (Prefix:)LocalName. See
   // http://www.w3.org/TR/REC-xml-names/#ns-qualnames for additional details.
   /*--cef()--*/
-  virtual std::wstring GetQualifiedName() =0;
+  virtual CefString GetQualifiedName() =0;
 
   // Returns the URI defining the namespace associated with the node. See
   // http://www.w3.org/TR/REC-xml-names/ for additional details.
   /*--cef()--*/
-  virtual std::wstring GetNamespaceURI() =0;
+  virtual CefString GetNamespaceURI() =0;
 
   // Returns the base URI of the node. See http://www.w3.org/TR/xmlbase/ for
   // additional details.
   /*--cef()--*/
-  virtual std::wstring GetBaseURI() =0;
+  virtual CefString GetBaseURI() =0;
 
   // Returns the xml:lang scope within which the node resides. See
   // http://www.w3.org/TR/REC-xml/#sec-lang-tag for additional details.
   /*--cef()--*/
-  virtual std::wstring GetXmlLang() =0;
+  virtual CefString GetXmlLang() =0;
 
   // Returns true if the node represents an empty element. <a/> is considered
   // empty but <a></a> is not.
@@ -1342,7 +1444,7 @@ public:
 
   // Returns the text value.
   /*--cef()--*/
-  virtual std::wstring GetValue() =0;
+  virtual CefString GetValue() =0;
 
   // Returns true if the node has attributes.
   /*--cef()--*/
@@ -1354,25 +1456,25 @@ public:
 
   // Returns the value of the attribute at the specified 0-based index.
   /*--cef(capi_name=get_attribute_byindex)--*/
-  virtual std::wstring GetAttribute(int index) =0;
+  virtual CefString GetAttribute(int index) =0;
 
   // Returns the value of the attribute with the specified qualified name.
   /*--cef(capi_name=get_attribute_byqname)--*/
-  virtual std::wstring GetAttribute(const std::wstring& qualifiedName) =0;
+  virtual CefString GetAttribute(const CefString& qualifiedName) =0;
 
   // Returns the value of the attribute with the specified local name and
   // namespace URI.
   /*--cef(capi_name=get_attribute_bylname)--*/
-  virtual std::wstring GetAttribute(const std::wstring& localName,
-                                    const std::wstring& namespaceURI) =0;
+  virtual CefString GetAttribute(const CefString& localName,
+                                    const CefString& namespaceURI) =0;
 
   // Returns an XML representation of the current node's children.
   /*--cef()--*/
-  virtual std::wstring GetInnerXml() =0;
+  virtual CefString GetInnerXml() =0;
 
   // Returns an XML representation of the current node including its children.
   /*--cef()--*/
-  virtual std::wstring GetOuterXml() =0;
+  virtual CefString GetOuterXml() =0;
 
   // Returns the line number for the current node.
   /*--cef()--*/
@@ -1392,13 +1494,13 @@ public:
   // Moves the cursor to the attribute with the specified qualified name.
   // Returns true if the cursor position was set successfully.
   /*--cef(capi_name=move_to_attribute_byqname)--*/
-  virtual bool MoveToAttribute(const std::wstring& qualifiedName) =0;
+  virtual bool MoveToAttribute(const CefString& qualifiedName) =0;
 
   // Moves the cursor to the attribute with the specified local name and
   // namespace URI. Returns true if the cursor position was set successfully.
   /*--cef(capi_name=move_to_attribute_bylname)--*/
-  virtual bool MoveToAttribute(const std::wstring& localName,
-                               const std::wstring& namespaceURI) =0;
+  virtual bool MoveToAttribute(const CefString& localName,
+                               const CefString& namespaceURI) =0;
 
   // Moves the cursor to the first attribute in the current element. Returns
   // true if the cursor position was set successfully.
@@ -1418,6 +1520,8 @@ public:
 
 
 // Class that supports the reading of zip archives via the zlib unzip API.
+// The methods of this class should only be called on the thread that creates
+// the object.
 /*--cef(source=library)--*/
 class CefZipReader : public CefBase
 {
@@ -1441,7 +1545,7 @@ public:
   // is true then the search will be case sensitive. Returns true if the cursor
   // position was set successfully. 
   /*--cef()--*/
-  virtual bool MoveToFile(const std::wstring& fileName, bool caseSensitive) =0;
+  virtual bool MoveToFile(const CefString& fileName, bool caseSensitive) =0;
 
   // Closes the archive. This should be called directly to ensure that cleanup
   // occurs on the correct thread.
@@ -1453,7 +1557,7 @@ public:
 
   // Returns the name of the file.
   /*--cef()--*/
-  virtual std::wstring GetFileName() =0;
+  virtual CefString GetFileName() =0;
 
   // Returns the uncompressed size of the file.
   /*--cef()--*/
@@ -1466,7 +1570,7 @@ public:
   // Opens the file for reading of uncompressed data. A read password may
   // optionally be specified.
   /*--cef()--*/
-  virtual bool OpenFile(const std::wstring& password) =0;
+  virtual bool OpenFile(const CefString& password) =0;
 
   // Closes the file.
   /*--cef()--*/
@@ -1495,10 +1599,9 @@ public:
   {
     Init();
   }
-  ~CefPopupFeatures()
+  virtual ~CefPopupFeatures()
   {
-    if(additionalFeatures)
-      cef_string_list_free(additionalFeatures);
+    Reset();
   }
 
   CefPopupFeatures(const CefPopupFeatures& r)
@@ -1512,6 +1615,55 @@ public:
     *this = r;
   }
 
+  void Reset()
+  {
+    if(additionalFeatures)
+      cef_string_list_free(additionalFeatures);
+  }
+
+  void Attach(const cef_popup_features_t& r)
+  {
+    Reset();
+    *static_cast<cef_popup_features_t*>(this) = r;
+  }
+
+  void Detach()
+  {
+    Init();
+  }
+
+  CefPopupFeatures& operator=(const CefPopupFeatures& r)
+  {
+    return operator=(static_cast<const cef_popup_features_t&>(r));
+  }
+
+  CefPopupFeatures& operator=(const cef_popup_features_t& r)
+  {
+    if(additionalFeatures)
+      cef_string_list_free(additionalFeatures);
+    additionalFeatures = r.additionalFeatures ?
+        cef_string_list_copy(r.additionalFeatures) : NULL;
+
+    x = r.x;
+    xSet = r.xSet;
+    y = r.y;
+    ySet = r.ySet;
+    width = r.width;
+    widthSet = r.widthSet;
+    height = r.height;
+    heightSet = r.heightSet;
+    menuBarVisible = r.menuBarVisible;
+    statusBarVisible = r.statusBarVisible;
+    toolBarVisible = r.toolBarVisible;
+    locationBarVisible = r.locationBarVisible;
+    scrollbarsVisible = r.scrollbarsVisible;
+    resizable = r.resizable;
+    fullscreen = r.fullscreen;
+    dialog = r.dialog;
+    return *this;
+  }
+
+protected:
   void Init()
   {
     x = 0;
@@ -1534,46 +1686,289 @@ public:
     dialog = false;
     additionalFeatures = NULL;
   }
+};
 
-  CefPopupFeatures& operator=(const CefPopupFeatures& r)
+
+// Class representing initialization settings.
+class CefSettings : public cef_settings_t
+{
+public:
+  CefSettings()
   {
-    return operator=(static_cast<const cef_popup_features_t&>(r));
+    Init();
+  }
+  virtual ~CefSettings()
+  {
+    Reset();
   }
 
-  CefPopupFeatures& operator=(const cef_popup_features_t& r)
+  CefSettings(const CefSettings& r)
   {
-    if(additionalFeatures)
-      cef_string_list_free(additionalFeatures);
-    if(r.additionalFeatures) {
-      additionalFeatures = cef_string_list_alloc();
-      unsigned int size = cef_string_list_size(r.additionalFeatures);
-      for(unsigned int i = 0; i < size; ++i) {
-        cef_string_t feature = cef_string_list_value(r.additionalFeatures, i);
-        cef_string_list_append(additionalFeatures, feature);
-        cef_string_free(feature);
-      }
-    }
-    else {
-      additionalFeatures = NULL;
-    }
+    Init();
+    *this = r;
+  }
+  CefSettings(const cef_settings_t& r)
+  {
+    Init();
+    *this = r;
+  }
 
-    x = r.x;
-    xSet = r.xSet;
-    y = r.y;
-    ySet = r.ySet;
-    width = r.width;
-    widthSet = r.widthSet;
-    height = r.height;
-    heightSet = r.heightSet;
-    menuBarVisible = r.menuBarVisible;
-    statusBarVisible = r.statusBarVisible;
-    toolBarVisible = r.toolBarVisible;
-    locationBarVisible = r.locationBarVisible;
-    scrollbarsVisible = r.scrollbarsVisible;
-    resizable = r.resizable;
-    fullscreen = r.fullscreen;
-    dialog = r.dialog;
+  void Reset()
+  {
+    cef_string_clear(&cache_path);
+    cef_string_clear(&user_agent);
+    cef_string_clear(&product_version);
+    cef_string_clear(&locale);
+    if(extra_plugin_paths)
+      cef_string_list_free(extra_plugin_paths);
+    cef_string_clear(&log_file);
+    Init();
+  }
+
+  void Attach(const cef_settings_t& r)
+  {
+    Reset();
+    *static_cast<cef_settings_t*>(this) = r;
+  }
+
+  void Detach()
+  {
+    Init();
+  }
+
+  CefSettings& operator=(const CefSettings& r)
+  {
+    return operator=(static_cast<const cef_settings_t&>(r));
+  }
+
+  CefSettings& operator=(const cef_settings_t& r)
+  {
+    multi_threaded_message_loop = r.multi_threaded_message_loop;
+
+    cef_string_copy(r.cache_path.str, r.cache_path.length, &cache_path);
+    cef_string_copy(r.user_agent.str, r.user_agent.length, &user_agent);
+    cef_string_copy(r.product_version.str, r.product_version.length,
+        &product_version);
+    cef_string_copy(r.locale.str, r.locale.length, &locale);
+
+    if(extra_plugin_paths)
+      cef_string_list_free(extra_plugin_paths);
+    extra_plugin_paths = r.extra_plugin_paths ?
+        cef_string_list_copy(r.extra_plugin_paths) : NULL;
+
+    cef_string_copy(r.log_file.str, r.log_file.length, &log_file);
+    log_severity = r.log_severity;
+
     return *this;
+  }
+
+protected:
+  void Init()
+  {
+    memset(static_cast<cef_settings_t*>(this), 0, sizeof(cef_settings_t));
+    size = sizeof(cef_settings_t);
+  }
+};
+
+
+// Class representing browser initialization settings.
+class CefBrowserSettings : public cef_browser_settings_t
+{
+public:
+  CefBrowserSettings()
+  {
+    Init();
+  }
+  virtual ~CefBrowserSettings()
+  {
+    Reset();
+  }
+
+  CefBrowserSettings(const CefBrowserSettings& r)
+  {
+    Init();
+    *this = r;
+  }
+  CefBrowserSettings(const cef_browser_settings_t& r)
+  {
+    Init();
+    *this = r;
+  }
+
+  void Reset()
+  {
+    cef_string_clear(&standard_font_family);
+    cef_string_clear(&fixed_font_family);
+    cef_string_clear(&serif_font_family);
+    cef_string_clear(&sans_serif_font_family);
+    cef_string_clear(&cursive_font_family);
+    cef_string_clear(&fantasy_font_family);
+    cef_string_clear(&default_encoding);
+    cef_string_clear(&user_style_sheet_location);
+    Init();
+  }
+
+  void Attach(const cef_browser_settings_t& r)
+  {
+    Reset();
+    *static_cast<cef_browser_settings_t*>(this) = r;
+  }
+
+  void Detach()
+  {
+    Init();
+  }
+
+  CefBrowserSettings& operator=(const CefBrowserSettings& r)
+  {
+    return operator=(static_cast<const cef_browser_settings_t&>(r));
+  }
+
+  CefBrowserSettings& operator=(const cef_browser_settings_t& r)
+  {
+    drag_drop_disabled = r.drag_drop_disabled;
+
+    cef_string_copy(r.standard_font_family.str, r.standard_font_family.length,
+        &standard_font_family);
+    cef_string_copy(r.fixed_font_family.str, r.fixed_font_family.length,
+        &fixed_font_family);
+    cef_string_copy(r.serif_font_family.str, r.serif_font_family.length,
+        &serif_font_family);
+    cef_string_copy(r.sans_serif_font_family.str,
+        r.sans_serif_font_family.length, &sans_serif_font_family);
+    cef_string_copy(r.cursive_font_family.str, r.cursive_font_family.length,
+        &cursive_font_family);
+    cef_string_copy(r.fantasy_font_family.str, r.fantasy_font_family.length,
+        &fantasy_font_family);
+
+    default_font_size = r.default_font_size;
+    default_fixed_font_size = r.default_fixed_font_size;
+    minimum_font_size = r.minimum_font_size;
+    minimum_logical_font_size = r.minimum_logical_font_size;
+    remote_fonts_disabled = r.remote_fonts_disabled;
+
+    cef_string_copy(r.default_encoding.str, r.default_encoding.length,
+        &default_encoding);
+
+    encoding_detector_enabled = r.encoding_detector_enabled;
+    javascript_disabled = r.javascript_disabled;
+    javascript_open_windows_disallowed = r.javascript_open_windows_disallowed;
+    javascript_close_windows_disallowed = r.javascript_close_windows_disallowed;
+    javascript_access_clipboard_disallowed =
+        r.javascript_access_clipboard_disallowed;
+    dom_paste_disabled = r.dom_paste_disabled;
+    caret_browsing_enabled = r.caret_browsing_enabled;
+    java_disabled = r.java_disabled;
+    plugins_disabled = r.plugins_disabled;
+    universal_access_from_file_urls_allowed =
+        r.universal_access_from_file_urls_allowed;
+    file_access_from_file_urls_allowed = r.file_access_from_file_urls_allowed;
+    web_security_disabled = r.web_security_disabled;
+    xss_auditor_enabled = r.xss_auditor_enabled;
+    image_load_disabled = r.image_load_disabled;
+    shrink_standalone_images_to_fit = r.shrink_standalone_images_to_fit;
+    site_specific_quirks_disabled = r.site_specific_quirks_disabled;
+    text_area_resize_disabled = r.text_area_resize_disabled;
+    page_cache_disabled = r.page_cache_disabled;
+    tab_to_links_disabled = r.tab_to_links_disabled;
+    hyperlink_auditing_disabled = r.hyperlink_auditing_disabled;
+    user_style_sheet_enabled = r.user_style_sheet_enabled;
+
+    cef_string_copy(r.user_style_sheet_location.str,
+        r.user_style_sheet_location.length, &user_style_sheet_location);
+
+    author_and_user_styles_disabled = r.author_and_user_styles_disabled;
+    local_storage_disabled = r.local_storage_disabled;
+    databases_disabled = r.databases_disabled;
+    application_cache_disabled = r.application_cache_disabled;
+    webgl_disabled = r.webgl_disabled;
+    accelerated_compositing_disabled = r.accelerated_compositing_disabled;
+    accelerated_layers_disabled = r.accelerated_layers_disabled;
+    accelerated_2d_canvas_disabled = r.accelerated_2d_canvas_disabled;
+    developer_tools_disabled = r.developer_tools_disabled;
+
+    return *this;
+  }
+
+protected:
+  void Init()
+  {
+    memset(static_cast<cef_browser_settings_t*>(this), 0,
+        sizeof(cef_browser_settings_t));
+    size = sizeof(cef_browser_settings_t);
+  }
+};
+
+// Class used to represent a URL's component parts.
+class CefURLParts : public cef_urlparts_t
+{
+public:
+  CefURLParts()
+  {
+    Init();
+  }
+  virtual ~CefURLParts()
+  {
+    Reset();
+  }
+
+  CefURLParts(const CefURLParts& r)
+  {
+    Init();
+    *this = r;
+  }
+  CefURLParts(const cef_urlparts_t& r)
+  {
+    Init();
+    *this = r;
+  }
+
+  void Reset()
+  {
+    cef_string_clear(&spec);
+    cef_string_clear(&scheme);
+    cef_string_clear(&username);
+    cef_string_clear(&password);
+    cef_string_clear(&host);
+    cef_string_clear(&port);
+    cef_string_clear(&path);
+    cef_string_clear(&query);
+    Init();
+  }
+
+  void Attach(const cef_urlparts_t& r)
+  {
+    Reset();
+    *static_cast<cef_urlparts_t*>(this) = r;
+  }
+
+  void Detach()
+  {
+    Init();
+  }
+
+  CefURLParts& operator=(const CefURLParts& r)
+  {
+    return operator=(static_cast<const cef_urlparts_t&>(r));
+  }
+
+  CefURLParts& operator=(const cef_urlparts_t& r)
+  {
+    cef_string_copy(r.spec.str, r.spec.length, &spec);
+    cef_string_copy(r.scheme.str, r.scheme.length, &scheme);
+    cef_string_copy(r.username.str, r.username.length, &username);
+    cef_string_copy(r.password.str, r.password.length, &password);
+    cef_string_copy(r.host.str, r.host.length, &host);
+    cef_string_copy(r.port.str, r.port.length, &port);
+    cef_string_copy(r.path.str, r.path.length, &path);
+    cef_string_copy(r.query.str, r.query.length, &query);
+    return *this;
+  }
+
+protected:
+  void Init()
+  {
+    memset(static_cast<cef_urlparts_t*>(this), 0, sizeof(cef_urlparts_t));
   }
 };
 

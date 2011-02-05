@@ -17,33 +17,33 @@ public:
 
   // Execute with the specified argument list and return value.  Return true if
   // the method was handled.
-  virtual bool Execute(const std::wstring& name,
+  virtual bool Execute(const CefString& name,
                        CefRefPtr<CefV8Value> object,
                        const CefV8ValueList& arguments,
                        CefRefPtr<CefV8Value>& retval,
-                       std::wstring& exception)
+                       CefString& exception)
   {
 #ifdef _WIN32
     UINT command_id = 0;
-    if(name == L"find") {
+    if(name == "find") {
       command_id = ID_FIND;
-    } else if(name == L"print") {
+    } else if(name == "print") {
       command_id = ID_PRINT;
-    } else if(name == L"about") {
+    } else if(name == "about") {
       command_id = IDM_ABOUT;
-    } else if(name == L"exit") {
+    } else if(name == "exit") {
       command_id = IDM_EXIT;
-    } else if(name == L"windowrect") {
+    } else if(name == "windowrect") {
       RECT rect;
       GetWindowRect(AppGetMainHwnd(), &rect);
       retval = CefV8Value::CreateArray();
-      retval->SetValue(L"x", CefV8Value::CreateInt(rect.left));
-      retval->SetValue(L"y", CefV8Value::CreateInt(rect.top));
-      retval->SetValue(L"width", CefV8Value::CreateInt(rect.right - rect.left));
-      retval->SetValue(L"height",
+      retval->SetValue("x", CefV8Value::CreateInt(rect.left));
+      retval->SetValue("y", CefV8Value::CreateInt(rect.top));
+      retval->SetValue("width", CefV8Value::CreateInt(rect.right - rect.left));
+      retval->SetValue("height",
           CefV8Value::CreateInt(rect.bottom - rect.top));
       return true;
-    } else if(name == L"setwindowrect") {
+    } else if(name == "setwindowrect") {
       if(arguments.size() != 4)
         return false;
       RECT rect;
@@ -56,10 +56,16 @@ public:
       SetWindowPos(AppGetMainHwnd(), NULL, rect.left, rect.top,
           rect.right - rect.left, rect.bottom - rect.top, SWP_NOZORDER);
       return true;
-    } else if(name == L"settings") {
+    } else if(name == "settings") {
       CefRefPtr<WbeaHandler> handler(
           (WbeaHandler*)AppGetBrowser()->GetHandler().get());
       retval = CefV8Value::CreateString(handler->GetAppSettings());
+      return true;
+    } else if(name == "showdevtools") {
+      AppGetBrowser()->ShowDevTools();
+      return true;
+    } else if(name == "closedevtools") {
+      AppGetBrowser()->CloseDevTools();
       return true;
     }
     
@@ -77,38 +83,46 @@ void InitWbeaExtension()
 {
   // Register a V8 extension with the below JavaScript code that calls native
   // methods implemented in WbeaV8ExtensionHandler.
-  std::wstring code = L"var app;"
-    L"if (!app)"
-    L"  app = {};"
-    L"(function() {"
-    L"  app.find = function() {"
-    L"    native function find();"
-    L"    find();"
-    L"  };"
-    L"  app.print = function() {"
-    L"    native function print();"
-    L"    print();"
-    L"  };"
-    L"  app.about = function() {"
-    L"    native function about();"
-    L"    about();"
-    L"  };"
-    L"  app.exit = function() {"
-    L"    native function exit();"
-    L"    exit();"
-    L"  };"
-    L"  app.windowrect = function() {"
-    L"    native function windowrect();"
-    L"    return windowrect();"
-    L"  };"
-    L"  app.setwindowrect = function(x, y, w, h) {"
-    L"    native function setwindowrect();"
-    L"    setwindowrect(x, y, w, h);"
-    L"  };"
-    L"  app.settings = function() {"
-    L"    native function settings();"
-    L"    return settings();"
-    L"  };"
-    L"})();";
-  CefRegisterExtension(L"v8/app", code, new WbeaV8ExtensionHandler());
+  CefString code = "var app;"
+    "if (!app)"
+    "  app = {};"
+    "(function() {"
+    "  app.find = function() {"
+    "    native function find();"
+    "    find();"
+    "  };"
+    "  app.print = function() {"
+    "    native function print();"
+    "    print();"
+    "  };"
+    "  app.about = function() {"
+    "    native function about();"
+    "    about();"
+    "  };"
+    "  app.exit = function() {"
+    "    native function exit();"
+    "    exit();"
+    "  };"
+    "  app.windowrect = function() {"
+    "    native function windowrect();"
+    "    return windowrect();"
+    "  };"
+    "  app.setwindowrect = function(x, y, w, h) {"
+    "    native function setwindowrect();"
+    "    setwindowrect(x, y, w, h);"
+    "  };"
+    "  app.settings = function() {"
+    "    native function settings();"
+    "    return settings();"
+    "  };"
+    "  app.showdevtools = function() {"
+    "    native function showdevtools();"
+    "    return showdevtools();"
+    "  };"
+    "  app.closedevtools = function() {"
+    "    native function closedevtools();"
+    "    return closedevtools();"
+    "  };"
+    "})();";
+  CefRegisterExtension("v8/app", code, new WbeaV8ExtensionHandler());
 }

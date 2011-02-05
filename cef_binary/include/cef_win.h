@@ -48,7 +48,7 @@ public:
     memset(&m_sec, 0, sizeof(CRITICAL_SECTION));
     InitializeCriticalSection(&m_sec);
   }
-  ~CefCriticalSection()
+  virtual ~CefCriticalSection()
   {
     DeleteCriticalSection(&m_sec);
   }
@@ -72,10 +72,9 @@ public:
   {
     Init();
   }
-  ~CefWindowInfo()
+  virtual ~CefWindowInfo()
   {
-    if(m_windowName)
-      cef_string_free(m_windowName);
+    Reset();
   }
 
   CefWindowInfo(const CefWindowInfo& r)
@@ -89,18 +88,21 @@ public:
     *this = r;
   }
 
-  void Init()
+  void Reset()
   {
-    m_dwExStyle = 0;
-    m_windowName = NULL;
-    m_dwStyle = 0;
-    m_x = 0;
-    m_y = 0;
-    m_nWidth = 0;
-    m_nHeight = 0;
-    m_hWndParent = NULL;
-    m_hMenu = 0;
-    m_hWnd = NULL;
+    cef_string_clear(&m_windowName);
+    Init();
+  }
+
+  void Attach(const cef_window_info_t& r)
+  {
+    Reset();
+    *static_cast<cef_window_info_t*>(this) = r;
+  }
+
+  void Detach()
+  {
+    Init();
   }
 
   CefWindowInfo& operator=(const CefWindowInfo& r)
@@ -110,12 +112,7 @@ public:
   CefWindowInfo& operator=(const cef_window_info_t& r)
   {
     m_dwExStyle = r.m_dwExStyle;
-    if(m_windowName)
-      cef_string_free(m_windowName);
-    if(r.m_windowName)
-      m_windowName = cef_string_alloc(r.m_windowName);
-    else
-      m_windowName = NULL;
+    cef_string_copy(r.m_windowName.str, r.m_windowName.length, &m_windowName);
     m_dwStyle = r.m_dwStyle;
     m_x = r.m_x;
     m_y = r.m_y;
@@ -138,7 +135,7 @@ public:
     m_nHeight = windowRect.bottom - windowRect.top;
   }
 
-  void SetAsPopup(HWND hWndParent, LPCWSTR windowName)
+  void SetAsPopup(HWND hWndParent, const CefString& windowName)
   {
     m_dwStyle = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
     m_hWndParent = hWndParent;
@@ -147,12 +144,13 @@ public:
     m_nWidth = CW_USEDEFAULT;
     m_nHeight = CW_USEDEFAULT;
 
-    if(m_windowName)
-      cef_string_free(m_windowName);
-    if(windowName)
-      m_windowName = cef_string_alloc(windowName);
-    else
-      m_windowName = NULL;
+    cef_string_copy(windowName.c_str(), windowName.length(), &m_windowName);
+  }
+
+protected:
+  void Init()
+  {
+    memset(static_cast<cef_window_info_t*>(this), 0, sizeof(cef_window_info_t));
   }
 };
 
@@ -164,7 +162,7 @@ public:
   {
     Init();
   }
-  ~CefPrintInfo()
+  virtual ~CefPrintInfo()
   {
   }
 

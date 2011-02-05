@@ -136,7 +136,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="../cef_binary/lib/Release2008/libcef.lib ../cef_binary/lib/Release2008/libcef_dll_wrapper.lib"
-				GenerateDebugInformation="true"
+				GenerateDebugInformation="false"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
 				TargetMachine="1"
@@ -187,10 +187,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\string_util_win.cpp"
-				>
-			</File>
-			<File
 				RelativePath=".\wbea.cpp"
 				>
 			</File>
@@ -222,10 +218,6 @@
 			</File>
 			<File
 				RelativePath=".\resource_util.h"
-				>
-			</File>
-			<File
-				RelativePath=".\string_util.h"
 				>
 			</File>
 			<File

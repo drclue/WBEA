@@ -1,9 +1,9 @@
 Chromium Embedded Framework (CEF) Binary Distribution
 -------------------------------------------------------------------------------
 
-CEF Revision:        141
-Chromium Revision:   66269
-Date:                November 17, 2010
+CEF Revision:        181
+Chromium Revision:   71081
+Date:                February 1, 2011
 
 This distribution contains all files necessary to build an application using
 CEF.  Please read the included LICENSE.txt file for licensing terms and
