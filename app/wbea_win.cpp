@@ -303,13 +303,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			    DestroyWindow(hWnd);
 			    return 0;
         case ID_WARN_CONSOLEMESSAGE:
-          if(g_handler.get()) {
+          /*if(g_handler.get()) {
             std::stringstream ss;
             ss << "Console messages will be written to "
                << g_handler->GetLogFile();
             MessageBoxA(hWnd, ss.str().c_str(), "Console Messages",
                 MB_OK | MB_ICONINFORMATION);
-          }
+          }*/
           return 0;
         case ID_FIND:
           if(!hFindDlg)
